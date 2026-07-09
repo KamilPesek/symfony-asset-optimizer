@@ -1,0 +1,34 @@
+{
+  "name": "pesek/symfony-asset-optimizer",
+  "description": "Symfony AssetMapper optimizer, npm-free: minify JS/CSS/SVG (tdewolff/minify), optimize PNG (oxipng) and JPEG (GD), and generate + serve WebP twins (cwebp) — all via auto-downloaded binaries with a GD fallback.",
+  "type": "symfony-bundle",
+  "license": "proprietary",
+  "keywords": [
+    "symfony",
+    "assetmapper",
+    "webp",
+    "minify",
+    "images",
+    "gd",
+    "tdewolff"
+  ],
+  "require": {
+    "php": ">=8.4",
+    "ext-gd": "*",
+    "ext-phar": "*",
+    "symfony/asset-mapper": "^7.1 || ^8.0",
+    "symfony/config": "^7.1 || ^8.0",
+    "symfony/console": "^7.1 || ^8.0",
+    "symfony/dependency-injection": "^7.1 || ^8.0",
+    "symfony/event-dispatcher": "^7.1 || ^8.0",
+    "symfony/finder": "^7.1 || ^8.0",
+    "symfony/http-client": "^7.1 || ^8.0",
+    "symfony/http-kernel": "^7.1 || ^8.0",
+    "symfony/process": "^7.1 || ^8.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "AssetOptimizer\\": "src/"
+    }
+  }
+}
