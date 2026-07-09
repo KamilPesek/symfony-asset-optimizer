@@ -6,7 +6,6 @@ namespace AssetOptimizer\Minify;
 
 use AssetOptimizer\Binary\BinaryInstaller;
 use AssetOptimizer\Binary\Tool;
-use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
 
@@ -22,29 +21,23 @@ final class Minifier
 
     public function minify(string $content, string $type): string
     {
+        // Any failure — the binary can't be downloaded, can't be executed, or
+        // exits non-zero — degrades to shipping the content unminified rather
+        // than breaking the build. This mirrors the image path (which falls
+        // back to GD) so no single tool can take the whole compile down.
         try {
-            $binary = $this->binaries->path(Tool::Minify);
+            $process = new Process([$this->binaries->path(Tool::Minify), '--type', $type]);
+            $process->setInput($content);
+            $process->setTimeout(60);
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                return $process->getOutput();
+            }
         } catch (Throwable) {
-            // Binary unavailable (download failed): ship the content unminified
-            // rather than failing the whole build. A failure of the binary on
-            // the content itself (below) still surfaces — that is a content
-            // problem worth stopping the build for.
-            return $content;
+            // fall through to the unminified content
         }
 
-        $process = new Process([$binary, '--type', $type]);
-        $process->setInput($content);
-        $process->setTimeout(60);
-        $process->run();
-
-        if (!$process->isSuccessful()) {
-            throw new RuntimeException(sprintf(
-                'minify (--type %s) failed: %s',
-                $type,
-                trim($process->getErrorOutput()) ?: 'unknown error',
-            ));
-        }
-
-        return $process->getOutput();
+        return $content;
     }
 }

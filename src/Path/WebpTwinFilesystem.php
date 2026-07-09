@@ -6,6 +6,7 @@ namespace AssetOptimizer\Path;
 
 use AssetOptimizer\Image\ImageOptimizer;
 use Symfony\Component\AssetMapper\Path\PublicAssetsFilesystemInterface;
+use Throwable;
 use function strlen;
 
 /**
@@ -54,26 +55,29 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
      */
     private function writeTwin(string $path, int|false $sourceSize): void
     {
-        if (!$this->wantsTwin($path)) {
+        if (!$this->enabled || 1 !== preg_match('/\.(jpe?g|png)$/i', $path)) {
             return;
         }
 
-        $webp = $this->optimizer->webp($this->localPath($path), $this->quality);
-        if (null === $webp || '' === $webp) {
+        $local = $this->localPath($path);
+        if (is_file($local . '.webp')) {
+            return; // content-hashed name → already converted
+        }
+
+        $webp = $this->optimizer->webp($local, $this->quality);
+        if (null === $webp) {
             return;
         }
         if (false !== $sourceSize && strlen($webp) >= $sourceSize) {
             return;
         }
 
-        $this->inner->write($path . '.webp', $webp);
-    }
-
-    private function wantsTwin(string $path): bool
-    {
-        return $this->enabled
-            && 1 === preg_match('/\.(jpe?g|png)$/i', $path)
-            && !is_file($this->localPath($path) . '.webp');
+        // Best-effort: a twin that can't be written must never break the build.
+        try {
+            $this->inner->write($path . '.webp', $webp);
+        } catch (Throwable) {
+            // leave the raster without a twin; the Accept rule falls back to it
+        }
     }
 
     private function localPath(string $path): string

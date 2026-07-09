@@ -9,11 +9,13 @@ use RuntimeException;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\Filesystem\Exception\IOException;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use ZipArchive;
 use function in_array;
+use function strlen;
 use const PHP_OS_FAMILY;
 
 /**
@@ -93,7 +95,17 @@ final class BinaryInstaller
             // chmod before the rename so the binary appears complete and
             // executable in one atomic step.
             $this->fs->chmod($found, 0o755);
-            $this->fs->rename($found, $binary, true);
+            try {
+                $this->fs->rename($found, $binary, true);
+            } catch (IOException $e) {
+                // A parallel first-use compile won the race and placed the
+                // binary first (rename-over-existing is not atomic on Windows,
+                // so it throws here). Its result is equivalent to ours — accept
+                // it rather than failing the build.
+                if (!is_file($binary)) {
+                    throw $e;
+                }
+            }
         } finally {
             $this->fs->remove($work);
         }
@@ -119,10 +131,18 @@ final class BinaryInstaller
         if (false === $handle) {
             throw new RuntimeException(sprintf('Cannot write "%s".', $archive));
         }
-        foreach ($this->httpClient->stream($response) as $chunk) {
-            fwrite($handle, $chunk->getContent());
+        try {
+            foreach ($this->httpClient->stream($response) as $chunk) {
+                $bytes = $chunk->getContent();
+                if (strlen($bytes) !== fwrite($handle, $bytes)) {
+                    throw new RuntimeException(sprintf('Short write to "%s" (disk full?).', $archive));
+                }
+            }
+        } finally {
+            // Always release the handle so the caller's cleanup (and Windows,
+            // which locks open files) can remove the work directory.
+            fclose($handle);
         }
-        fclose($handle);
         $progress?->finish();
         $this->output?->writeln('');
     }
