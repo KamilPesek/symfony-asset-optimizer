@@ -2,7 +2,13 @@
   "name": "pesek/symfony-asset-optimizer",
   "description": "Symfony AssetMapper optimizer, npm-free: minify JS/CSS/SVG (tdewolff/minify), optimize PNG (oxipng) and JPEG (GD), and generate + serve WebP twins (cwebp) — all via auto-downloaded binaries with a GD fallback.",
   "type": "symfony-bundle",
-  "license": "proprietary",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Kamil Pešek",
+      "email": "pesek.kamil@seznam.cz"
+    }
+  ],
   "keywords": [
     "symfony",
     "assetmapper",
