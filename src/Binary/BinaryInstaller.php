@@ -13,6 +13,7 @@ use Symfony\Component\Filesystem\Exception\IOException;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Throwable;
 use ZipArchive;
 use function in_array;
 use function strlen;
@@ -33,6 +34,9 @@ final class BinaryInstaller
 
     private readonly Filesystem $fs;
 
+    /** @var array<string, true> tools whose download failed this process — not retried */
+    private array $failed = [];
+
     public function __construct(
         #[Autowire('%kernel.project_dir%')]
         private readonly string              $projectDir,
@@ -52,8 +56,28 @@ final class BinaryInstaller
         $dir = $this->projectDir . '/var/asset-optimizer';
         $binary = $dir . '/' . $tool->value . ('Windows' === PHP_OS_FAMILY ? '.exe' : '');
 
-        if (!is_file($binary)) {
+        if (is_file($binary)) {
+            return $binary;
+        }
+
+        // A download that already failed this process is not retried: the whole
+        // compile touches many assets of the same type, and without this every
+        // one would re-attempt the (still failing) download and block on it.
+        if (isset($this->failed[$tool->value])) {
+            throw new RuntimeException(sprintf('"%s" is unavailable (download failed earlier this run).', $tool->value));
+        }
+
+        try {
             $this->download($tool, $dir, $binary);
+        } catch (Throwable $e) {
+            $this->failed[$tool->value] = true;
+            $this->output?->writeln(sprintf(
+                '<comment>Asset Optimizer:</comment> "%s" unavailable (%s) — affected assets ship without it.',
+                $tool->value,
+                $e->getMessage(),
+            ));
+
+            throw $e;
         }
 
         return $binary;
@@ -107,7 +131,15 @@ final class BinaryInstaller
                 }
             }
         } finally {
-            $this->fs->remove($work);
+            // Best-effort cleanup: a locked leftover (e.g. AV still scanning an
+            // extracted file on Windows) must never fail an otherwise-successful
+            // install. The unique work-dir name means a stray dir collides with
+            // nothing on a later run.
+            try {
+                $this->fs->remove($work);
+            } catch (IOException) {
+                // leave the work dir; it is harmless
+            }
         }
     }
 

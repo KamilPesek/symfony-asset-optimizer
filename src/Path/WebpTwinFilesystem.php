@@ -33,13 +33,13 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
     public function write(string $path, string $contents): void
     {
         $this->inner->write($path, $contents);
-        $this->writeTwin($path, strlen($contents));
+        $this->writeTwin($path);
     }
 
     public function copy(string $originPath, string $path): void
     {
         $this->inner->copy($originPath, $path);
-        $this->writeTwin($path, @filesize($originPath));
+        $this->writeTwin($path);
     }
 
     public function getDestinationPath(): string
@@ -49,11 +49,9 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
 
     /**
      * Encodes a WebP twin from the just-written asset and drops it next to the
-     * source when it is genuinely smaller. $sourceSize is the size of the asset
-     * the twin would replace; `false` (size unknown) skips the size guard rather
-     * than discarding an otherwise valid twin.
+     * source when it is genuinely smaller than the raster it would replace.
      */
-    private function writeTwin(string $path, int|false $sourceSize): void
+    private function writeTwin(string $path): void
     {
         if (!$this->enabled || 1 !== preg_match('/\.(jpe?g|png)$/i', $path)) {
             return;
@@ -64,16 +62,20 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
             return; // content-hashed name → already converted
         }
 
-        $webp = $this->optimizer->webp($local, $this->quality);
-        if (null === $webp) {
-            return;
-        }
-        if (false !== $sourceSize && strlen($webp) >= $sourceSize) {
-            return;
-        }
-
-        // Best-effort: a twin that can't be written must never break the build.
+        // Best-effort: nothing here — the encode (incl. its GD fallback), the
+        // size check, or the write — may break the build. A missing twin is
+        // fine; the Accept rule serves the raster instead.
         try {
+            $webp = $this->optimizer->webp($local, $this->quality);
+            if (null === $webp) {
+                return;
+            }
+            // The just-written local file is exactly the asset the twin would
+            // replace, so its size is always available — no size-unknown case.
+            $sourceSize = @filesize($local);
+            if (false !== $sourceSize && strlen($webp) >= $sourceSize) {
+                return;
+            }
             $this->inner->write($path . '.webp', $webp);
         } catch (Throwable) {
             // leave the raster without a twin; the Accept rule falls back to it
