@@ -1,0 +1,17 @@
+# All optimizations are enabled by default — uncomment only what you change.
+asset_optimizer:
+#    js:
+#        enabled: true
+#    css:
+#        enabled: true          # covers sass-bundle output too
+#    svg:
+#        enabled: true
+#    jpg_png:
+#        enabled: true
+#        quality: 80            # JPEG re-encode quality (PNG is lossless)
+#    webp:
+#        enabled: true
+#        quality: 80            # cwebp -q
+#    ignore_paths:
+#        - '*.min.js'
+#        - '*.min.css'

@@ -34,7 +34,7 @@ final class AssetOptimizerBundle extends AbstractBundle
             ->arrayNode('svg')->addDefaultsIfNotSet()
             ->children()->booleanNode('enabled')->defaultTrue()->end()->end()
             ->end()
-            ->arrayNode('images')->addDefaultsIfNotSet()
+            ->arrayNode('jpg_png')->addDefaultsIfNotSet()
             ->children()
             ->booleanNode('enabled')->defaultTrue()->end()
             ->integerNode('quality')->defaultValue(80)->end()
@@ -58,8 +58,8 @@ final class AssetOptimizerBundle extends AbstractBundle
         $builder->setParameter('asset_optimizer.js_enabled', $config['js']['enabled']);
         $builder->setParameter('asset_optimizer.css_enabled', $config['css']['enabled']);
         $builder->setParameter('asset_optimizer.svg_enabled', $config['svg']['enabled']);
-        $builder->setParameter('asset_optimizer.images_enabled', $config['images']['enabled']);
-        $builder->setParameter('asset_optimizer.image_quality', $config['images']['quality']);
+        $builder->setParameter('asset_optimizer.jpg_png_enabled', $config['jpg_png']['enabled']);
+        $builder->setParameter('asset_optimizer.jpg_png_quality', $config['jpg_png']['quality']);
         $builder->setParameter('asset_optimizer.webp_enabled', $config['webp']['enabled']);
         $builder->setParameter('asset_optimizer.webp_quality', $config['webp']['quality']);
         $builder->setParameter('asset_optimizer.ignore_paths', $config['ignore_paths']);

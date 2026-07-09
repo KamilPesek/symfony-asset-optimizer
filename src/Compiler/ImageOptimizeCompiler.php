@@ -25,9 +25,9 @@ final class ImageOptimizeCompiler implements AssetCompilerInterface
 
     public function __construct(
         private readonly ImageOptimizer $optimizer,
-        #[Autowire('%asset_optimizer.images_enabled%')]
+        #[Autowire('%asset_optimizer.jpg_png_enabled%')]
         private readonly bool           $enabled,
-        #[Autowire('%asset_optimizer.image_quality%')]
+        #[Autowire('%asset_optimizer.jpg_png_quality%')]
         private readonly int            $quality,
     )
     {

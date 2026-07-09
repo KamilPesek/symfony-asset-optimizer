@@ -1,7 +1,11 @@
 # Asset Optimizer Bundle
 
-Symfony AssetMapper optimizer in one bundle — **npm-free**. Each job uses a
-standalone binary (auto-downloaded, like sass-bundle's dart-sass) or PHP GD:
+Symfony's AssetMapper maps, versions and serves your assets — but it doesn't
+optimize them, and the usual answers (esbuild, svgo, imagemin, squoosh…) drag
+Node, npm and `node_modules` into a PHP project. This bundle fills that gap
+**npm-free**: each job uses a standalone binary that is auto-downloaded on
+first use (like sass-bundle's dart-sass) or falls back to pure-PHP GD, so it
+always works.
 
 - **Minify** JS, CSS and SVG → **`tdewolff/minify`** — production compile only.
 - **Optimize** PNG → **`oxipng`** (lossless); JPEG → **PHP GD**.
@@ -10,10 +14,45 @@ standalone binary (auto-downloaded, like sass-bundle's dart-sass) or PHP GD:
 - **Serve** WebP transparently via a web-server `Accept` rule (Apache/Caddy).
 
 Everything runs inside `asset-map:compile`. **No Node, no npm, no `node_modules`.**
-Each binary is downloaded once into `var/asset-optimizer/`; if a download or run fails, that job falls back to GD, so the
-bundle always works.
 
-## Behavior per environment
+## Quick start
+
+**1. Install:**
+
+```bash
+composer require pesek/symfony-asset-optimizer
+```
+
+If Flex doesn't register the bundle (the recipe isn't published yet), add it:
+
+```php
+// config/bundles.php
+AssetOptimizer\AssetOptimizerBundle::class => ['all' => true],
+```
+
+Every optimization is now on by default — minify, image optimization and WebP
+twins all run inside `asset-map:compile`. Config is optional; to tweak it, copy
+[`recipe/config/packages/asset_optimizer.yaml`](recipe/config/packages/asset_optimizer.yaml)
+into your project (see [Configuration](#configuration)).
+
+**2. Serve the WebP twins** *(optional, but recommended — the rest works
+without it)*: the twins are generated next to your images, but browsers only
+receive them after you add a small rewrite rule to your web server
+(Apache `.htaccess` or Caddy) — see [WebP serving rule](#webp-serving-rule).
+
+Day to day:
+
+- **Prod build:** `APP_ENV=prod bin/console asset-map:compile` — sass → minify
+  → optimize → WebP twins → manifest, in one command.
+- **Dev preview:** `bin/console asset-optimizer:watch` — see [Commands](#commands).
+- Requirements (GD, first-compile network access): see
+  [Requirements](#requirements--no-npm).
+
+---
+
+## Details
+
+### Behavior per environment
 
 |                       | dev (dynamic serving / watch)    | prod compile |
 |-----------------------|----------------------------------|--------------|
@@ -31,19 +70,6 @@ SCSS map works as usual). Prod output ships **without** source maps — tdewolff
 strips `sourceMappingURL` comments and cannot emit maps. If you need debuggable
 prod assets, disable minify per type (`js.enabled: false`, `css.enabled: false`).
 
-## Install
-
-```bash
-composer require pesek/symfony-asset-optimizer
-```
-
-Register it (if Flex doesn't):
-
-```php
-// config/bundles.php
-AssetOptimizer\AssetOptimizerBundle::class => ['all' => true],
-```
-
 ### Requirements — no npm
 
 - The **`gd`** PHP extension with WebP support (`ext-gd`, standard on most builds) — used
@@ -57,7 +83,7 @@ that job falls back to GD automatically.
 
 > **JPEG note:** JPEG stays on GD — mozjpeg (the tool that would beat it) publishes no
 > standalone binary. `oxipng` (PNG) and `cwebp -m6` (WebP) are the real wins over GD.
-> Binary versions are pinned in `Binary\BinaryInstaller`.
+> Binary versions are pinned in the `Binary\Tool` enum.
 
 ### WebP serving rule
 
@@ -123,9 +149,12 @@ changes when migrating from Apache — the twin naming contract
 `Vary: Accept` is required in both servers — the same URL returns different
 bytes per client, and shared caches/CDNs must key on it.
 
-## Configuration
+### Configuration
 
-Defaults shown — the file is optional if they suit you:
+Defaults shown — the file is optional if they suit you. The bundle ships the
+same file, fully commented out, as a Flex recipe in
+[`recipe/`](recipe/) (contrib format, ready for `symfony/recipes-contrib` once
+the bundle is public).
 
 ```yaml
 # config/packages/asset_optimizer.yaml
@@ -136,7 +165,7 @@ asset_optimizer:
         enabled: true          # covers sass-bundle output too
     svg:
         enabled: true
-    images:
+    jpg_png:
         enabled: true
         quality: 80            # JPEG re-encode quality (PNG is lossless)
     webp:
@@ -153,12 +182,13 @@ asset_optimizer:
 > recompiling, or already-compiled images keep their old bytes. Fresh CI/deploy
 > builds are unaffected.
 
-## Commands
+### Commands
 
-- **Dev preview:** `bin/console asset-optimizer:watch` — watches `assets/` and
-  recompiles on change (sass runs automatically inside the compile if
-  sass-bundle is installed), so optimized images + WebP are served live in dev.
-  JS/CSS stay unminified. Stop with Ctrl-C; `rm -rf public/assets` returns to
-  plain dynamic dev serving.
-- **Prod build:** `APP_ENV=prod bin/console asset-map:compile` — one command:
-  sass → minify → optimize → WebP twins → manifest.
+- **Dev preview:** `bin/console asset-optimizer:watch`
+    - watches `assets/`
+    - recompiles on change (sass runs automatically inside the compile if sass-bundle is installed)
+    - optimized images + WebP are served live in dev
+    - JS/CSS stay unminified
+    - stop with Ctrl-C; `rm -rf public/assets` returns to plain dynamic dev serving.
+- **Prod build:** `APP_ENV=prod bin/console asset-map:compile`
+    - one command: sass → minify → optimize → WebP twins → manifest.

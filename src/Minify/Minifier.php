@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AssetOptimizer\Minify;
 
 use AssetOptimizer\Binary\BinaryInstaller;
+use AssetOptimizer\Binary\Tool;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 
@@ -20,7 +21,7 @@ final class Minifier
 
     public function minify(string $content, string $type): string
     {
-        $process = new Process([$this->binaries->path('minify'), '--type', $type]);
+        $process = new Process([$this->binaries->path(Tool::Minify), '--type', $type]);
         $process->setInput($content);
         $process->setTimeout(60);
         $process->run();

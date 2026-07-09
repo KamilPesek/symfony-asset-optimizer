@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AssetOptimizer\Image;
 
 use AssetOptimizer\Binary\BinaryInstaller;
+use AssetOptimizer\Binary\Tool;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -48,7 +49,7 @@ final readonly class ImageOptimizer
     {
         try {
             $out = $this->tempFile('webp');
-            $this->run([$this->binaries->path('cwebp'), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', $out]);
+            $this->run([$this->binaries->path(Tool::Cwebp), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', $out]);
             $bytes = @file_get_contents($out);
             @unlink($out);
 
@@ -69,7 +70,7 @@ final readonly class ImageOptimizer
         try {
             $tmp = $this->tempFile('png');
             file_put_contents($tmp, $content);
-            $this->run([$this->binaries->path('oxipng'), '-o', 'max', '--strip', 'safe', '-q', $tmp]);
+            $this->run([$this->binaries->path(Tool::Oxipng), '-o', 'max', '--strip', 'safe', '-q', $tmp]);
             $bytes = @file_get_contents($tmp);
             @unlink($tmp);
 
