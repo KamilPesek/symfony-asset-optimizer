@@ -8,6 +8,7 @@ use AssetOptimizer\Binary\BinaryInstaller;
 use AssetOptimizer\Binary\Tool;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 /**
  * Minifies text content (js, css, svg) by piping it through the tdewolff/minify
@@ -21,7 +22,17 @@ final class Minifier
 
     public function minify(string $content, string $type): string
     {
-        $process = new Process([$this->binaries->path(Tool::Minify), '--type', $type]);
+        try {
+            $binary = $this->binaries->path(Tool::Minify);
+        } catch (Throwable) {
+            // Binary unavailable (download failed): ship the content unminified
+            // rather than failing the whole build. A failure of the binary on
+            // the content itself (below) still surfaces — that is a content
+            // problem worth stopping the build for.
+            return $content;
+        }
+
+        $process = new Process([$binary, '--type', $type]);
         $process->setInput($content);
         $process->setTimeout(60);
         $process->run();

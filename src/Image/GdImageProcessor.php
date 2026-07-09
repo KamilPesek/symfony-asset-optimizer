@@ -32,7 +32,7 @@ final class GdImageProcessor
             }
             $out = ob_get_clean();
 
-            return false === $out ? null : $out;
+            return false === $out || '' === $out ? null : $out;
         } finally {
             imagedestroy($img);
         }
@@ -58,7 +58,7 @@ final class GdImageProcessor
             imagewebp($img, null, $quality);
             $out = ob_get_clean();
 
-            return false === $out ? null : $out;
+            return false === $out || '' === $out ? null : $out;
         } finally {
             imagedestroy($img);
         }

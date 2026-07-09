@@ -9,6 +9,7 @@ use RuntimeException;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use ZipArchive;
@@ -19,10 +20,16 @@ use const PHP_OS_FAMILY;
  * Downloads and caches standalone tool binaries (see the {@see Tool} enum)
  * into var/asset-optimizer/ on first use — the "download a binary, no npm"
  * model of symfonycasts/sass-bundle. No Node, no node_modules.
+ *
+ * Concurrency-safe: each download extracts into its own unique work directory
+ * and the finished binary is moved into place with an atomic rename, so
+ * parallel first-use compiles never see a partial binary.
  */
 final class BinaryInstaller
 {
     private ?OutputInterface $output = null;
+
+    private readonly Filesystem $fs;
 
     public function __construct(
         #[Autowire('%kernel.project_dir%')]
@@ -30,6 +37,7 @@ final class BinaryInstaller
         private readonly HttpClientInterface $httpClient,
     )
     {
+        $this->fs = new Filesystem();
     }
 
     public function setOutput(?OutputInterface $output): void
@@ -62,14 +70,37 @@ final class BinaryInstaller
         $url = $tool->url($os, $arch);
         $ext = str_ends_with($url, '.zip') ? 'zip' : 'tar.gz';
 
-        if (!is_dir($dir) && !@mkdir($dir, 0o777, true) && !is_dir($dir)) {
-            throw new RuntimeException(sprintf('Cannot create "%s".', $dir));
+        // Unique per attempt so concurrent processes never share extraction state.
+        $work = $dir . '/.' . $tool->value . '-' . bin2hex(random_bytes(8));
+        $this->fs->mkdir($work, 0o755);
+
+        try {
+            $archive = $work . '/archive.' . $ext;
+            $this->fetch($url, $archive);
+            $this->extract($archive, $ext, $work);
+
+            // Locate the binary by name anywhere inside the extracted tree.
+            $name = basename($binary);
+            $found = null;
+            foreach (new Finder()->files()->in($work)->name($name)->size('> 0') as $file) {
+                $found = $file->getRealPath();
+                break;
+            }
+            if (null === $found) {
+                throw new RuntimeException(sprintf('"%s" not found in %s.', $name, $url));
+            }
+
+            // chmod before the rename so the binary appears complete and
+            // executable in one atomic step.
+            $this->fs->chmod($found, 0o755);
+            $this->fs->rename($found, $binary, true);
+        } finally {
+            $this->fs->remove($work);
         }
+    }
 
-        $work = $dir . '/.' . $tool->value . '-download';
-        @mkdir($work, 0o777, true);
-        $archive = $work . '/archive.' . $ext;
-
+    private function fetch(string $url, string $archive): void
+    {
         // Stream the response straight to disk (never buffer the whole archive in
         // memory) with a progress bar when a console output is available.
         $this->output?->writeln(sprintf('<info>Asset Optimizer:</info> downloading %s…', basename($url)));
@@ -85,47 +116,38 @@ final class BinaryInstaller
         ]);
 
         $handle = fopen($archive, 'w');
+        if (false === $handle) {
+            throw new RuntimeException(sprintf('Cannot write "%s".', $archive));
+        }
         foreach ($this->httpClient->stream($response) as $chunk) {
             fwrite($handle, $chunk->getContent());
         }
         fclose($handle);
         $progress?->finish();
         $this->output?->writeln('');
-
-        if ('zip' === $ext) {
-            $zip = new ZipArchive();
-            $zip->open($archive);
-            $zip->extractTo($work);
-            $zip->close();
-        } else {
-            new PharData($archive)->extractTo($work, null, true);
-        }
-
-        // Locate the binary by name anywhere inside the extracted tree.
-        $name = basename($binary);
-        $found = null;
-        foreach (new Finder()->files()->in($work)->name($name) as $file) {
-            $found = $file->getRealPath();
-            break;
-        }
-        if (null === $found) {
-            $this->rrmdir($work);
-            throw new RuntimeException(sprintf('"%s" not found in %s.', $name, $url));
-        }
-
-        copy($found, $binary);
-        @chmod($binary, 0o755);
-        $this->rrmdir($work);
     }
 
-    private function rrmdir(string $dir): void
+    private function extract(string $archive, string $ext, string $work): void
     {
-        if (!is_dir($dir)) {
+        if ('tar.gz' === $ext) {
+            new PharData($archive)->extractTo($work, null, true);
+
             return;
         }
-        foreach (new Finder()->in($dir)->depth('< 100')->reverseSorting() as $item) {
-            $item->isDir() ? @rmdir($item->getRealPath()) : @unlink($item->getRealPath());
+
+        if (!class_exists(ZipArchive::class)) {
+            throw new RuntimeException('The "zip" PHP extension is required to extract .zip tool archives.');
         }
-        @rmdir($dir);
+        $zip = new ZipArchive();
+        if (true !== $zip->open($archive)) {
+            throw new RuntimeException(sprintf('Cannot open "%s".', $archive));
+        }
+        try {
+            if (!$zip->extractTo($work)) {
+                throw new RuntimeException(sprintf('Cannot extract "%s".', $archive));
+            }
+        } finally {
+            $zip->close();
+        }
     }
 }

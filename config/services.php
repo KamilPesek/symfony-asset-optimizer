@@ -8,11 +8,13 @@ use AssetOptimizer\Compiler\ImageOptimizeCompiler;
 use AssetOptimizer\Compiler\JsCssMinifyCompiler;
 use AssetOptimizer\Compiler\SvgMinifyCompiler;
 use AssetOptimizer\EventListener\BinaryDownloadOutputListener;
-use AssetOptimizer\EventListener\WebpTwinGenerator;
 use AssetOptimizer\Image\GdImageProcessor;
 use AssetOptimizer\Image\ImageOptimizer;
 use AssetOptimizer\Minify\Minifier;
+use AssetOptimizer\Path\WebpTwinFilesystem;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use function Symfony\Component\DependencyInjection\Loader\Configurator\param;
+use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
 return static function (ContainerConfigurator $container): void {
     $services = $container->services()
@@ -34,8 +36,18 @@ return static function (ContainerConfigurator $container): void {
             ->tag('asset_mapper.compiler', ['priority' => -256]);
     }
 
+    // WebP twins are generated inside the asset write path — works for every
+    // compile entry point (console command, programmatic, watch subprocess).
+    $services->set(WebpTwinFilesystem::class)
+        ->decorate('asset_mapper.local_public_assets_filesystem')
+        ->args([
+            service('.inner'),
+            service(ImageOptimizer::class),
+            param('asset_optimizer.webp_enabled'),
+            param('asset_optimizer.webp_quality'),
+        ]);
+
     // Registered via #[AsEventListener] / #[AsCommand] attributes (autoconfigure on).
     $services->set(BinaryDownloadOutputListener::class);
-    $services->set(WebpTwinGenerator::class);
     $services->set(WatchCommand::class);
 };

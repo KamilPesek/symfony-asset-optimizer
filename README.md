@@ -4,13 +4,14 @@ Symfony's AssetMapper maps, versions and serves your assets — but it doesn't
 optimize them, and the usual answers (esbuild, svgo, imagemin, squoosh…) drag
 Node, npm and `node_modules` into a PHP project. This bundle fills that gap
 **npm-free**: each job uses a standalone binary that is auto-downloaded on
-first use (like sass-bundle's dart-sass) or falls back to pure-PHP GD, so it
-always works.
+first use (like sass-bundle's dart-sass) and degrades gracefully — a failed
+download never breaks the build (images/WebP fall back to pure-PHP GD, minify
+ships the files unminified).
 
 - **Minify** JS, CSS and SVG → **`tdewolff/minify`** — production compile only.
 - **Optimize** PNG → **`oxipng`** (lossless); JPEG → **PHP GD**.
 - **Generate WebP** twins (`<name>.jpg.webp`) → **`cwebp`** (max effort `-m 6`),
-  after `asset-map:compile`, incrementally.
+  during `asset-map:compile`, incrementally.
 - **Serve** WebP transparently via a web-server `Accept` rule (Apache/Caddy).
 
 Everything runs inside `asset-map:compile`. **No Node, no npm, no `node_modules`.**
@@ -78,8 +79,9 @@ prod assets, disable minify per type (`js.enabled: false`, `css.enabled: false`)
   downloaded once into `var/asset-optimizer/` (cached thereafter). Build-time only —
   each binary is fetched lazily, only when an asset of its type is compiled.
 
-Nothing in your `package.json`, no `node_modules`. If a binary can't be downloaded/run,
-that job falls back to GD automatically.
+Nothing in your `package.json`, no `node_modules`. If a binary can't be
+downloaded, the build still succeeds: image and WebP jobs fall back to pure-PHP
+GD automatically, and JS/CSS/SVG are shipped unminified.
 
 > **JPEG note:** JPEG stays on GD — mozjpeg (the tool that would beat it) publishes no
 > standalone binary. `oxipng` (PNG) and `cwebp -m6` (WebP) are the real wins over GD.

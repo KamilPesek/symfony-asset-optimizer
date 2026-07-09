@@ -7,6 +7,7 @@ namespace AssetOptimizer\Image;
 use AssetOptimizer\Binary\BinaryInstaller;
 use AssetOptimizer\Binary\Tool;
 use RuntimeException;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\Process;
 use Throwable;
 use function strlen;
@@ -21,11 +22,14 @@ use function strlen;
  */
 final readonly class ImageOptimizer
 {
+    private Filesystem $fs;
+
     public function __construct(
         private BinaryInstaller  $binaries,
         private GdImageProcessor $gd,
     )
     {
+        $this->fs = new Filesystem();
     }
 
     /**
@@ -48,13 +52,15 @@ final readonly class ImageOptimizer
     public function webp(string $sourcePath, int $quality): ?string
     {
         try {
-            $out = $this->tempFile('webp');
-            $this->run([$this->binaries->path(Tool::Cwebp), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', $out]);
-            $bytes = @file_get_contents($out);
-            @unlink($out);
-
-            if (false !== $bytes && '' !== $bytes) {
-                return $bytes;
+            $out = $this->fs->tempnam(sys_get_temp_dir(), 'ao_', '.webp');
+            try {
+                $this->run([$this->binaries->path(Tool::Cwebp), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', $out]);
+                $bytes = @file_get_contents($out);
+                if (false !== $bytes && '' !== $bytes) {
+                    return $bytes;
+                }
+            } finally {
+                @unlink($out);
             }
         } catch (Throwable) {
             // fall through to GD
@@ -68,13 +74,12 @@ final readonly class ImageOptimizer
     private function oxipng(string $content): ?string
     {
         try {
-            $tmp = $this->tempFile('png');
-            file_put_contents($tmp, $content);
-            $this->run([$this->binaries->path(Tool::Oxipng), '-o', 'max', '--strip', 'safe', '-q', $tmp]);
-            $bytes = @file_get_contents($tmp);
-            @unlink($tmp);
-
-            if (false !== $bytes && '' !== $bytes) {
+            // Piped via stdin/stdout — no temp files.
+            $bytes = $this->run(
+                [$this->binaries->path(Tool::Oxipng), '-o', 'max', '--strip', 'safe', '-q', '--stdout', '-'],
+                $content,
+            );
+            if ('' !== $bytes) {
                 return $bytes;
             }
         } catch (Throwable) {
@@ -87,23 +92,17 @@ final readonly class ImageOptimizer
     /**
      * @param list<string> $command
      */
-    private function run(array $command): void
+    private function run(array $command, ?string $input = null): string
     {
         $process = new Process($command);
+        $process->setInput($input);
         $process->setTimeout(120);
         $process->run();
 
         if (!$process->isSuccessful()) {
             throw new RuntimeException(trim($process->getErrorOutput()) ?: 'image tool failed');
         }
-    }
 
-    private function tempFile(string $ext): string
-    {
-        $tmp = tempnam(sys_get_temp_dir(), 'ao_');
-        $path = $tmp . '.' . $ext;
-        rename($tmp, $path);
-
-        return $path;
+        return $process->getOutput();
     }
 }
