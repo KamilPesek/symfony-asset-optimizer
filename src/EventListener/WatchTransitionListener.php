@@ -21,6 +21,9 @@ use Symfony\Component\HttpKernel\Event\RequestEvent;
  * once per request and, whenever the observed state differs from the
  * {@see WatchLock::recordedHeld()} one, runs the missed transition — the first
  * request after any unclean stop (or externally started watch) heals the state.
+ * A never-recorded state only heals toward "held" (an externally started
+ * watch); with no watch running it is left alone rather than treated as a
+ * missed stop.
  *
  * Priority is above AssetMapper's dev server subscriber (35) so asset requests
  * also see a consistent state. Cost on the steady path: one flock probe and
@@ -45,7 +48,12 @@ final readonly class WatchTransitionListener
         }
 
         $held = $this->watchLock->isHeld();
-        if ($held === $this->watchLock->recordedHeld()) {
+        $recorded = $this->watchLock->recordedHeld();
+        // A never-recorded state (null) means no watch has ever run here: there
+        // is nothing to heal, and running toReleased() would destructively
+        // remove compiled JSONs the user may have just built deliberately
+        // (e.g. a prod asset-map:compile on this checkout).
+        if ($held === $recorded || (!$held && null === $recorded)) {
             return;
         }
 

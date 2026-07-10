@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AssetOptimizer\Command;
 
 use AssetOptimizer\Watch\WatchLock;
+use AssetOptimizer\Watch\WatchLockUnavailableException;
 use AssetOptimizer\Watch\WatchTransition;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -65,8 +66,14 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io = new SymfonyStyle($input, $output);
         $io->title('Asset Optimizer — watch');
 
-        if (!$this->watchLock->hold()) {
-            $io->error('Another asset-optimizer:watch is already running.');
+        try {
+            if (!$this->watchLock->hold()) {
+                $io->error('Another asset-optimizer:watch is already running.');
+
+                return Command::FAILURE;
+            }
+        } catch (WatchLockUnavailableException $e) {
+            $io->error($e->getMessage());
 
             return Command::FAILURE;
         }
