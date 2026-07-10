@@ -14,6 +14,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Process\Process;
 use function defined;
@@ -49,6 +50,8 @@ use const SIGTERM;
 )]
 final class WatchCommand extends Command implements SignalableCommandInterface
 {
+    private readonly Filesystem $fs;
+
     private bool $running = true;
 
     public function __construct(
@@ -56,8 +59,11 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         private readonly WatchTransition $transition,
         #[Autowire('%kernel.project_dir%')]
         private readonly string          $projectDir,
+        #[Autowire('%kernel.debug%')]
+        private readonly bool            $debug,
     )
     {
+        $this->fs = new Filesystem();
         parent::__construct();
     }
 
@@ -65,6 +71,12 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     {
         $io = new SymfonyStyle($input, $output);
         $io->title('Asset Optimizer — watch');
+
+        if (!$this->debug) {
+            $io->error('asset-optimizer:watch is a dev preview tool and refuses to run with kernel.debug off (e.g. APP_ENV=prod): its start/stop cleanup would wipe this environment\'s asset cache and compiled config JSONs. Use asset-map:compile for builds.');
+
+            return Command::FAILURE;
+        }
 
         try {
             if (!$this->watchLock->hold()) {
@@ -82,25 +94,32 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io->writeln('<comment>Ctrl-C to stop.</comment>');
         $io->newLine();
 
-        // Digests flip to their optimized variants now that the lock is held;
-        // drop cached raw-digest entries so web requests recompute them.
-        $this->transition->toHeld();
+        try {
+            // Digests flip to their optimized variants now that the lock is
+            // held; drop cached raw-digest entries so requests recompute them.
+            if (!$this->transition->toHeld()) {
+                $io->warning('var/asset-optimizer/watch.state is not writable — check permissions. Cached raw digests were not cleared, so web requests may keep serving stale assets.');
+            }
 
-        $this->compile($io, 'initial build');
-        $signature = $this->snapshot();
+            $this->compile($io, 'initial build');
+            $signature = $this->snapshot();
 
-        while ($this->running) {
-            usleep(500_000);
-            $next = $this->snapshot();
-            if ($next !== $signature) {
-                $signature = $next;
-                $this->compile($io, 'change detected');
+            while ($this->running) {
+                usleep(500_000);
+                $next = $this->snapshot();
+                if ($next !== $signature) {
+                    $signature = $next;
+                    $this->compile($io, 'change detected');
+                }
+            }
+        } finally {
+            $this->watchLock->release();
+            // Back to raw-original digests in dev — also on the failure path,
+            // so a crashed compile never strands the "held" state.
+            if (!$this->transition->toReleased()) {
+                $io->warning('var/asset-optimizer/watch.state is not writable — check permissions. The dev state was not cleaned up and stays in the watch preview until it is fixed.');
             }
         }
-
-        $this->watchLock->release();
-        // Back to raw-original digests in dev.
-        $this->transition->toReleased();
 
         $io->newLine();
         $io->writeln('Stopped watching.');
@@ -115,7 +134,7 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     private function snapshot(): string
     {
         $dir = $this->projectDir . '/assets';
-        if (!is_dir($dir)) {
+        if (!$this->fs->exists($dir)) {
             return '';
         }
 

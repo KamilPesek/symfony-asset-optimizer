@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace AssetOptimizer\Path;
 
 use AssetOptimizer\Image\ImageOptimizer;
+use AssetOptimizer\Watch\WatchLock;
 use Symfony\Component\AssetMapper\Path\PublicAssetsFilesystemInterface;
+use Symfony\Component\Filesystem\Filesystem;
 use Throwable;
 use function strlen;
 
@@ -21,13 +23,18 @@ use function strlen;
  */
 final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterface
 {
+    private Filesystem $fs;
+
     public function __construct(
         private PublicAssetsFilesystemInterface $inner,
         private ImageOptimizer                  $optimizer,
+        private WatchLock                       $watchLock,
+        private bool                            $debug,
         private bool                            $enabled,
         private int                             $quality,
     )
     {
+        $this->fs = new Filesystem();
     }
 
     public function write(string $path, string $contents): void
@@ -57,8 +64,15 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
             return;
         }
 
+        // Mirror ImageOptimizeCompiler's dev gate: without a watch, dev writes
+        // raw rasters, and encoding twins of unoptimized bytes would waste
+        // cwebp work on files whose digests no watch preview ever references.
+        if ($this->debug && !$this->watchLock->isHeld()) {
+            return;
+        }
+
         $local = $this->localPath($path);
-        if (is_file($local . '.webp')) {
+        if ($this->fs->exists($local . '.webp')) {
             return; // content-hashed name → already converted
         }
 
@@ -82,8 +96,8 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
         // fine; the Accept rule serves the raster instead.
         try {
             // Re-check under the lock: the winner may have finished between the
-            // is_file() above and acquiring the lock.
-            if (is_file($local . '.webp')) {
+            // exists() above and acquiring the lock.
+            if ($this->fs->exists($local . '.webp')) {
                 return;
             }
             $webp = $this->optimizer->webp($local, $this->quality);

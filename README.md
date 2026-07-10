@@ -69,8 +69,10 @@ also what makes the [WebP serving rule](#webp-serving-rule) kick in. The two
 dev states use different content-hash digests (raw vs. optimized bytes); the
 watch clears AssetMapper's cache on start and stop so the digests actually
 flip, and a dev-only request listener runs the missed cleanup (cache + the
-compiled config JSONs) if the watch ever dies without it. Minify gates on
-`!kernel.debug`.
+compiled config JSONs) if the watch ever dies without it. Every compile stamps
+whether a watch drove it, and the cleanup only removes config JSONs carrying
+that stamp — a manifest you built deliberately with `asset-map:compile` is
+never deleted. Minify gates on `!kernel.debug`.
 
 **Source maps:** dev is unaffected (JS is served as raw source; sass-bundle's
 SCSS map works as usual). Prod output ships **without** source maps — tdewolff
@@ -208,6 +210,13 @@ asset_optimizer:
     - only one instance can run at a time; if the watch is killed without
       cleanup (`kill -9`, or Ctrl-C in a PHP build without `pcntl`), the next
       request notices the released lock and runs the missed cleanup
-      automatically.
+      automatically
+    - dev-only: it refuses to run with `kernel.debug` off (its cleanup would
+      wipe that environment's compiled assets).
 - **Prod build:** `APP_ENV=prod bin/console asset-map:compile`
     - one command: sass → minify → optimize → WebP twins → manifest.
+    - running `asset-map:compile` manually **in dev** (without a watch) writes
+      raw, unoptimized assets plus a manifest that pins dev to that snapshot —
+      AssetMapper then serves it instead of your live sources, and the watch
+      cleanup deliberately won't remove a manifest it didn't compile. Undo
+      with `rm -rf public/assets`.

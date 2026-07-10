@@ -8,6 +8,7 @@ use AssetOptimizer\Compiler\ImageOptimizeCompiler;
 use AssetOptimizer\Compiler\JsCssMinifyCompiler;
 use AssetOptimizer\Compiler\SvgMinifyCompiler;
 use AssetOptimizer\EventListener\BinaryDownloadOutputListener;
+use AssetOptimizer\EventListener\CompileSourceMarkerListener;
 use AssetOptimizer\EventListener\WatchTransitionListener;
 use AssetOptimizer\Image\GdImageProcessor;
 use AssetOptimizer\Image\ImageOptimizer;
@@ -15,11 +16,12 @@ use AssetOptimizer\Minify\Minifier;
 use AssetOptimizer\Path\WebpTwinFilesystem;
 use AssetOptimizer\Watch\WatchLock;
 use AssetOptimizer\Watch\WatchTransition;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\param;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
-return static function (ContainerConfigurator $container): void {
+return static function (ContainerConfigurator $container, ContainerBuilder $builder): void {
     $services = $container->services()
         ->defaults()
         ->autowire()
@@ -62,12 +64,20 @@ return static function (ContainerConfigurator $container): void {
         ->args([
             service('.inner'),
             service(ImageOptimizer::class),
+            service(WatchLock::class),
+            param('kernel.debug'),
             param('asset_optimizer.webp_enabled'),
             param('asset_optimizer.webp_quality'),
         ]);
 
     // Registered via #[AsEventListener] / #[AsCommand] attributes (autoconfigure on).
     $services->set(BinaryDownloadOutputListener::class);
-    $services->set(WatchTransitionListener::class);
+    $services->set(CompileSourceMarkerListener::class);
     $services->set(WatchCommand::class);
+
+    // The healing listener can only ever act in debug, so non-debug containers
+    // skip it entirely instead of invoking a no-op on every request.
+    if ($builder->getParameter('kernel.debug')) {
+        $services->set(WatchTransitionListener::class);
+    }
 };

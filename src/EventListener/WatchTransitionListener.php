@@ -6,8 +6,10 @@ namespace AssetOptimizer\EventListener;
 
 use AssetOptimizer\Watch\WatchLock;
 use AssetOptimizer\Watch\WatchTransition;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+use Symfony\Component\Filesystem\Exception\IOException;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 
 /**
@@ -20,23 +22,28 @@ use Symfony\Component\HttpKernel\Event\RequestEvent;
  * config JSONs keep serving the previous state. This listener probes the lock
  * once per request and, whenever the observed state differs from the
  * {@see WatchLock::recordedHeld()} one, runs the missed transition — the first
- * request after any unclean stop (or externally started watch) heals the state.
- * A never-recorded state only heals toward "held" (an externally started
- * watch); with no watch running it is left alone rather than treated as a
- * missed stop.
+ * request after any unclean stop (or externally started watch) heals the
+ * state. Config JSONs from a deliberate `asset-map:compile` are protected by
+ * the watch marker (see WatchTransition), not by this guard.
+ *
+ * Healing is strictly best-effort: a transition that cannot record itself
+ * declines to act (see {@see WatchTransition}), and filesystem failures are
+ * logged instead of thrown — a janitor must never take dev down.
  *
  * Priority is above AssetMapper's dev server subscriber (35) so asset requests
  * also see a consistent state. Cost on the steady path: one flock probe and
- * one small file read per request, in dev only.
+ * one small file read per request — dev only; non-debug containers don't even
+ * register this service (see config/services.php).
  */
 #[AsEventListener(event: RequestEvent::class, priority: 64)]
 final readonly class WatchTransitionListener
 {
     public function __construct(
-        private WatchLock       $watchLock,
-        private WatchTransition $transition,
+        private WatchLock        $watchLock,
+        private WatchTransition  $transition,
         #[Autowire('%kernel.debug%')]
-        private bool            $debug,
+        private bool             $debug,
+        private ?LoggerInterface $logger = null,
     )
     {
     }
@@ -48,15 +55,19 @@ final readonly class WatchTransitionListener
         }
 
         $held = $this->watchLock->isHeld();
-        $recorded = $this->watchLock->recordedHeld();
-        // A never-recorded state (null) means no watch has ever run here: there
-        // is nothing to heal, and running toReleased() would destructively
-        // remove compiled JSONs the user may have just built deliberately
-        // (e.g. a prod asset-map:compile on this checkout).
-        if ($held === $recorded || (!$held && null === $recorded)) {
+        if ($held === $this->watchLock->recordedHeld()) {
             return;
         }
 
-        $held ? $this->transition->toHeld() : $this->transition->toReleased();
+        try {
+            $healed = $held ? $this->transition->toHeld() : $this->transition->toReleased();
+        } catch (IOException $e) {
+            $this->logger?->warning('asset-optimizer: healing the watch state failed — fix the ownership/permissions of var/cache and public/assets. {message}', ['message' => $e->getMessage(), 'exception' => $e]);
+
+            return;
+        }
+        if (!$healed) {
+            $this->logger?->warning('asset-optimizer: the watch state changed but var/asset-optimizer/watch.state is not writable — image digests may be stale until permissions are fixed.');
+        }
     }
 }

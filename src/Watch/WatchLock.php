@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace AssetOptimizer\Watch;
 
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\Filesystem\Exception\IOException;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Contracts\Service\ResetInterface;
 use function dirname;
 use function sprintf;
@@ -30,6 +32,8 @@ final class WatchLock implements ResetInterface
 
     private const string STATE_FILE = '/var/asset-optimizer/watch.state';
 
+    private readonly Filesystem $fs;
+
     /** @var resource|null held handle — non-null only inside the watch process */
     private $handle = null;
 
@@ -46,6 +50,7 @@ final class WatchLock implements ResetInterface
         private readonly string $projectDir,
     )
     {
+        $this->fs = new Filesystem();
     }
 
     /**
@@ -63,10 +68,10 @@ final class WatchLock implements ResetInterface
         }
 
         $path = $this->projectDir . self::LOCK_FILE;
-        $dir = dirname($path);
-        // The `&& !is_dir()` re-check absorbs a concurrent mkdir by another process.
-        if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
-            throw new WatchLockUnavailableException(sprintf('Cannot create the lock directory "%s" — check permissions.', $dir));
+        try {
+            $this->fs->mkdir(dirname($path), 0o755);
+        } catch (IOException $e) {
+            throw new WatchLockUnavailableException(sprintf('Cannot create the lock directory "%s" — check permissions.', dirname($path)), previous: $e);
         }
 
         $handle = @fopen($path, 'c');
@@ -114,9 +119,18 @@ final class WatchLock implements ResetInterface
             return $this->probed;
         }
 
-        $handle = @fopen($this->projectDir . self::LOCK_FILE, 'r');
-        if (false === $handle) {
+        $path = $this->projectDir . self::LOCK_FILE;
+        if (!$this->fs->exists($path)) {
             return $this->probed = false; // no lock file → no watch has ever run
+        }
+
+        $handle = @fopen($path, 'r');
+        if (false === $handle) {
+            // The file exists but can't be opened (a watch run as another user
+            // left it unreadable): the lock is unprobeable, not absent. Answer
+            // with the recorded state so an unreadable lock never manufactures
+            // a held/recorded mismatch that would fight a possibly live watch.
+            return $this->probed = $this->recordedHeld();
         }
         // A shared lock succeeds unless the watch holds its exclusive one, and
         // never collides with other probes running at the same moment.
@@ -134,24 +148,33 @@ final class WatchLock implements ResetInterface
     /**
      * Last lock state whose cache-clearing side effects were performed —
      * recorded by the watch on clean start/stop and by the transition listener
-     * when it heals after an abnormal termination. Null when never recorded.
+     * when it heals after an abnormal termination. A missing or unreadable
+     * record reads as "released", the state every checkout starts in.
      */
-    public function recordedHeld(): ?bool
+    public function recordedHeld(): bool
     {
-        return match (@file_get_contents($this->projectDir . self::STATE_FILE)) {
-            'on' => true,
-            'off' => false,
-            default => null,
-        };
+        try {
+            return 'on' === $this->fs->readFile($this->projectDir . self::STATE_FILE);
+        } catch (IOException) {
+            return false; // missing or unreadable record → "released"
+        }
     }
 
-    public function record(bool $held): void
+    /**
+     * False when the record cannot be written. Callers must skip the
+     * transition's side effects in that case: a mismatch that can never be
+     * recorded as healed would re-run them on every request.
+     */
+    public function record(bool $held): bool
     {
-        $path = $this->projectDir . self::STATE_FILE;
-        $dir = dirname($path);
-        if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
-            return; // best-effort: an unwritable record just means one extra heal
+        try {
+            // dumpFile creates the directory and writes atomically (tmp file
+            // + rename), so a killed write can never leave a torn record.
+            $this->fs->dumpFile($this->projectDir . self::STATE_FILE, $held ? 'on' : 'off');
+        } catch (IOException) {
+            return false;
         }
-        @file_put_contents($path, $held ? 'on' : 'off');
+
+        return true;
     }
 }
