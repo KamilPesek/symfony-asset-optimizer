@@ -70,10 +70,12 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
             if (null === $webp) {
                 return;
             }
-            // The just-written local file is exactly the asset the twin would
-            // replace, so its size is always available — no size-unknown case.
+            // $local is the exact raster the twin competes with and was just
+            // written, so its size is available. Only write a genuinely smaller
+            // twin; if the size can't be read, skip rather than risk shipping a
+            // .webp larger than its source.
             $sourceSize = @filesize($local);
-            if (false !== $sourceSize && strlen($webp) >= $sourceSize) {
+            if (false === $sourceSize || strlen($webp) >= $sourceSize) {
                 return;
             }
             $this->inner->write($path . '.webp', $webp);

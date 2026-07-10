@@ -34,6 +34,9 @@ final class BinaryInstaller
 
     private readonly Filesystem $fs;
 
+    /** @var array<string, string> resolved binary paths, memoized for the process */
+    private array $resolved = [];
+
     /** @var array<string, true> tools whose download failed this process — not retried */
     private array $failed = [];
 
@@ -53,11 +56,17 @@ final class BinaryInstaller
 
     public function path(Tool $tool): string
     {
+        // A compile touches many assets of the same type; resolving the path
+        // once avoids a redundant stat per asset for an already-known binary.
+        if (isset($this->resolved[$tool->value])) {
+            return $this->resolved[$tool->value];
+        }
+
         $dir = $this->projectDir . '/var/asset-optimizer';
         $binary = $dir . '/' . $tool->value . ('Windows' === PHP_OS_FAMILY ? '.exe' : '');
 
         if (is_file($binary)) {
-            return $binary;
+            return $this->resolved[$tool->value] = $binary;
         }
 
         // A download that already failed this process is not retried: the whole
@@ -80,7 +89,7 @@ final class BinaryInstaller
             throw $e;
         }
 
-        return $binary;
+        return $this->resolved[$tool->value] = $binary;
     }
 
     private function download(Tool $tool, string $dir, string $binary): void

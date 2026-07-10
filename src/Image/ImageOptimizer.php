@@ -22,6 +22,12 @@ use function strlen;
  */
 final readonly class ImageOptimizer
 {
+    /** First 8 bytes of every PNG. */
+    private const string PNG_SIGNATURE = "\x89PNG\r\n\x1a\n";
+
+    /** Last 8 bytes of every PNG: the zero-length IEND chunk + its fixed CRC. */
+    private const string PNG_TRAILER = "IEND\xae\x42\x60\x82";
+
     private Filesystem $fs;
 
     public function __construct(
@@ -79,7 +85,12 @@ final readonly class ImageOptimizer
                 [$this->binaries->path(Tool::Oxipng), '-o', 'max', '--strip', 'safe', '-q', '--stdout', '-'],
                 $content,
             );
-            if ('' !== $bytes) {
+            // Trust stdout only if it looks like a complete PNG: require both
+            // the signature and the IEND trailer. A stream cut short (broken
+            // pipe, killed mid-write) that still exits 0 keeps the signature but
+            // loses the trailer; without this it would pass the caller's
+            // "smaller than the source" check and publish a truncated PNG.
+            if (str_starts_with($bytes, self::PNG_SIGNATURE) && str_ends_with($bytes, self::PNG_TRAILER)) {
                 return $bytes;
             }
         } catch (Throwable) {

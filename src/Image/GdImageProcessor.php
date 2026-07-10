@@ -30,9 +30,8 @@ final class GdImageProcessor
             } else {
                 imagejpeg($img, null, $quality);
             }
-            $out = ob_get_clean();
 
-            return false === $out || '' === $out ? null : $out;
+            return self::bufferToBytes(ob_get_clean());
         } finally {
             imagedestroy($img);
         }
@@ -56,11 +55,19 @@ final class GdImageProcessor
 
             ob_start();
             imagewebp($img, null, $quality);
-            $out = ob_get_clean();
 
-            return false === $out || '' === $out ? null : $out;
+            return self::bufferToBytes(ob_get_clean());
         } finally {
             imagedestroy($img);
         }
+    }
+
+    /**
+     * Normalizes an output-buffer result: a failed capture (false) or empty
+     * string means "no image produced" → null; otherwise the raw bytes.
+     */
+    private static function bufferToBytes(string|false $out): ?string
+    {
+        return false === $out || '' === $out ? null : $out;
     }
 }
