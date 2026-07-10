@@ -103,6 +103,7 @@ final class BinaryInstaller
         $arch = in_array(php_uname('m'), ['arm64', 'aarch64'], true) ? 'arm64' : 'amd64';
 
         $url = $tool->url($os, $arch);
+        $expectedHash = $tool->sha256($os, $arch); // before the download: fails fast on platforms with no artifact
         $ext = str_ends_with($url, '.zip') ? 'zip' : 'tar.gz';
 
         // Unique per attempt so concurrent processes never share extraction state.
@@ -112,6 +113,15 @@ final class BinaryInstaller
         try {
             $archive = $work . '/archive.' . $ext;
             $this->fetch($url, $archive);
+
+            // The downloaded bytes get executed, so verify them against the
+            // checksum pinned in Tool before extracting — TLS alone does not
+            // protect against a tampered release artifact.
+            $actualHash = hash_file('sha256', $archive);
+            if (false === $actualHash || !hash_equals($expectedHash, $actualHash)) {
+                throw new RuntimeException(sprintf('Checksum mismatch for "%s" — expected %s.', basename($url), $expectedHash));
+            }
+
             $this->extract($archive, $ext, $work);
 
             // Locate the binary by name anywhere inside the extracted tree.
