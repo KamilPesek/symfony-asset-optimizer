@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AssetOptimizer\Command;
 
+use AssetOptimizer\Watch\WatchLock;
+use AssetOptimizer\Watch\WatchTransition;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Command\SignalableCommandInterface;
@@ -22,6 +24,17 @@ use const SIGTERM;
  * Dev preview watch: recompiles the asset map whenever a source asset changes,
  * so optimized images + WebP twins are visible live in dev.
  *
+ * While running it holds the {@see WatchLock}, which is what switches
+ * {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler} on in dev — without a
+ * watch, dev serves raw originals. Start and stop run a {@see WatchTransition}
+ * so the content-hash digests actually flip between the two states; on stop
+ * the compiled asset files are kept (their WebP twins make the next start
+ * fast) and only the compiled config JSONs are removed — while those exist,
+ * AssetMapper would keep serving the compiled assets in dev. If the watch dies
+ * without cleanup (kill -9, or Ctrl-C without pcntl), the lock still
+ * auto-releases and {@see \AssetOptimizer\EventListener\WatchTransitionListener}
+ * heals the state on the next request.
+ *
  * `asset-map:compile` already runs the sass build (via the sass-bundle's
  * PreAssetsCompileEvent listener, if installed), so this single command covers
  * sass + optimization + WebP. JS/CSS are left unminified in dev, which keeps
@@ -38,8 +51,10 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     private bool $running = true;
 
     public function __construct(
+        private readonly WatchLock       $watchLock,
+        private readonly WatchTransition $transition,
         #[Autowire('%kernel.project_dir%')]
-        private readonly string $projectDir,
+        private readonly string          $projectDir,
     )
     {
         parent::__construct();
@@ -49,9 +64,20 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     {
         $io = new SymfonyStyle($input, $output);
         $io->title('Asset Optimizer — watch');
-        $io->writeln('Watching <info>assets/</info>. Optimized images + WebP are served in dev on change.');
+
+        if (!$this->watchLock->hold()) {
+            $io->error('Another asset-optimizer:watch is already running.');
+
+            return Command::FAILURE;
+        }
+
+        $io->writeln('Watching <info>assets/</info>. Optimized images + WebP are served in dev while this runs.');
         $io->writeln('<comment>Ctrl-C to stop.</comment>');
         $io->newLine();
+
+        // Digests flip to their optimized variants now that the lock is held;
+        // drop cached raw-digest entries so web requests recompute them.
+        $this->transition->toHeld();
 
         $this->compile($io, 'initial build');
         $signature = $this->snapshot();
@@ -64,6 +90,10 @@ final class WatchCommand extends Command implements SignalableCommandInterface
                 $this->compile($io, 'change detected');
             }
         }
+
+        $this->watchLock->release();
+        // Back to raw-original digests in dev.
+        $this->transition->toReleased();
 
         $io->newLine();
         $io->writeln('Stopped watching.');

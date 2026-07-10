@@ -55,16 +55,22 @@ Day to day:
 
 ### Behavior per environment
 
-|                       | dev (dynamic serving / watch)    | prod compile |
-|-----------------------|----------------------------------|--------------|
-| JS / CSS / SVG minify | **off** — assets stay debuggable | on           |
-| JPEG / PNG optimize   | **on**                           | on           |
-| WebP twins            | on (during a compile / watch)    | on           |
+|                       | dev (dynamic serving)            | dev + `asset-optimizer:watch` | prod compile |
+|-----------------------|----------------------------------|-------------------------------|--------------|
+| JS / CSS / SVG minify | **off** — assets stay debuggable | **off**                       | on           |
+| JPEG / PNG optimize   | **off** — raw originals          | **on**                        | on           |
+| WebP twins            | **off**                          | on                            | on           |
 
-Image optimization deliberately runs in *every* context so an image's compiled
-bytes — and therefore its content-hash digest — are identical in dev and prod
-(gating it on "is compiling" causes stale-digest 404s when switching between
-watch preview and dynamic dev serving). Minify gates on `!kernel.debug`.
+Plain dev serving delivers your images untouched. Running
+`asset-optimizer:watch` flips dev to the prod-like preview: it holds an
+advisory lock that switches the image compiler on, and keeps `public/assets`
+compiled so the web server serves the optimized rasters statically — which is
+also what makes the [WebP serving rule](#webp-serving-rule) kick in. The two
+dev states use different content-hash digests (raw vs. optimized bytes); the
+watch clears AssetMapper's cache on start and stop so the digests actually
+flip, and a dev-only request listener runs the missed cleanup (cache + the
+compiled config JSONs) if the watch ever dies without it. Minify gates on
+`!kernel.debug`.
 
 **Source maps:** dev is unaffected (JS is served as raw source; sass-bundle's
 SCSS map works as usual). Prod output ships **without** source maps — tdewolff
@@ -75,6 +81,9 @@ prod assets, disable minify per type (`js.enabled: false`, `css.enabled: false`)
 
 - The **`gd`** PHP extension with WebP support (`ext-gd`, standard on most builds) — used
   for JPEG and as the fallback encoder. `ext-phar` for `.tar.gz` extraction.
+- **`ext-pcntl`** *(optional, CLI only)* — lets `asset-optimizer:watch` clean up
+  on Ctrl-C itself. Without it the stop is a hard kill and the next dev request
+  performs the cleanup instead; behavior is the same either way.
 - Network access on the **first** compile: the `minify`, `cwebp` and `oxipng` binaries are
   downloaded once into `var/asset-optimizer/` (cached thereafter). Build-time only —
   each binary is fetched lazily, only when an asset of its type is compiled.
@@ -189,8 +198,16 @@ asset_optimizer:
 - **Dev preview:** `bin/console asset-optimizer:watch`
     - watches `assets/`
     - recompiles on change (sass runs automatically inside the compile if sass-bundle is installed)
-    - optimized images + WebP are served live in dev
+    - optimized images + WebP are served **only while it runs** — without a
+      watch, dev serves raw originals
     - JS/CSS stay unminified
-    - stop with Ctrl-C; `rm -rf public/assets` returns to plain dynamic dev serving.
+    - stop with Ctrl-C — dev returns to raw originals automatically: the
+      compiled config JSONs are removed (while they exist, AssetMapper keeps
+      serving compiled assets in dev), but the compiled asset files stay so
+      the next start reuses their WebP twins instead of re-encoding
+    - only one instance can run at a time; if the watch is killed without
+      cleanup (`kill -9`, or Ctrl-C in a PHP build without `pcntl`), the next
+      request notices the released lock and runs the missed cleanup
+      automatically.
 - **Prod build:** `APP_ENV=prod bin/console asset-map:compile`
     - one command: sass → minify → optimize → WebP twins → manifest.
