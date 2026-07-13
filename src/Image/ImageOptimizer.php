@@ -7,6 +7,7 @@ namespace AssetOptimizer\Image;
 use AssetOptimizer\Binary\BinaryInstaller;
 use AssetOptimizer\Binary\Tool;
 use RuntimeException;
+use Symfony\Component\Filesystem\Exception\IOException;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -58,23 +59,22 @@ final readonly class ImageOptimizer
     public function webp(string $sourcePath, int $quality): ?string
     {
         try {
-            $out = $this->fs->tempnam(sys_get_temp_dir(), 'ao_', '.webp');
-            try {
-                $this->run([$this->binaries->path(Tool::Cwebp), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', $out]);
-                $bytes = @file_get_contents($out);
-                if (false !== $bytes && '' !== $bytes) {
-                    return $bytes;
-                }
-            } finally {
-                @unlink($out);
+            // Piped via stdout ('-o -') — no temp files.
+            $bytes = $this->run([$this->binaries->path(Tool::Cwebp), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', '-']);
+            if ('' !== $bytes) {
+                return $bytes;
             }
         } catch (Throwable) {
             // fall through to GD
         }
 
-        $content = @file_get_contents($sourcePath);
+        try {
+            $content = $this->fs->readFile($sourcePath);
+        } catch (IOException) {
+            return null;
+        }
 
-        return false === $content ? null : $this->gd->webp($content, $quality);
+        return $this->gd->webp($content, $quality);
     }
 
     private function oxipng(string $content): ?string

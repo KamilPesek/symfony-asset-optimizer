@@ -65,7 +65,7 @@ final class BinaryInstaller
         $dir = $this->projectDir . '/var/asset-optimizer';
         $binary = $dir . '/' . $tool->value . ('Windows' === PHP_OS_FAMILY ? '.exe' : '');
 
-        if (is_file($binary)) {
+        if ($this->fs->exists($binary)) {
             return $this->resolved[$tool->value] = $binary;
         }
 
@@ -144,7 +144,9 @@ final class BinaryInstaller
                 // A parallel first-use compile won the race and placed the
                 // binary first (rename-over-existing is not atomic on Windows,
                 // so it throws here). Its result is equivalent to ours — accept
-                // it rather than failing the build.
+                // it rather than failing the build. is_file, not exists: only a
+                // real file proves a competitor won; anything else (e.g. a stray
+                // directory) means the rename genuinely failed.
                 if (!is_file($binary)) {
                     throw $e;
                 }
