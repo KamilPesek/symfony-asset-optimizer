@@ -76,30 +76,10 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
             return; // content-hashed name → already converted
         }
 
-        // Serialize twin generation for this exact raster across concurrent
-        // compiles (a watch subprocess and a manual `asset-map:compile` can both
-        // reach here for the same asset): an advisory lock on the source file
-        // lets only one process run the expensive cwebp `-m 6` encode; the loser
-        // skips and the winner produces the twin. flock is released when the fd
-        // closes — including on process death — so the lock can never go stale,
-        // unlike a lock file. If the file can't be opened we proceed unlocked
-        // (best-effort: at worst two processes encode, which is only wasted CPU).
-        $lock = @fopen($local, 'r');
-        if (false !== $lock && !flock($lock, LOCK_EX | LOCK_NB)) {
-            fclose($lock);
-
-            return;
-        }
-
         // Best-effort: nothing here — the encode (incl. its GD fallback), the
         // size check, or the write — may break the build. A missing twin is
         // fine; the Accept rule serves the raster instead.
         try {
-            // Re-check under the lock: the winner may have finished between the
-            // exists() above and acquiring the lock.
-            if ($this->fs->exists($local . '.webp')) {
-                return;
-            }
             $webp = $this->optimizer->webp($local, $this->quality);
             if (null === $webp) {
                 return;
@@ -115,11 +95,6 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
             $this->inner->write($path . '.webp', $webp);
         } catch (Throwable) {
             // leave the raster without a twin; the Accept rule falls back to it
-        } finally {
-            if (false !== $lock) {
-                flock($lock, LOCK_UN);
-                fclose($lock);
-            }
         }
     }
 

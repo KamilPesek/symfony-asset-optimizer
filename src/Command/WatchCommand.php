@@ -6,7 +6,6 @@ namespace AssetOptimizer\Command;
 
 use AssetOptimizer\Watch\WatchLock;
 use AssetOptimizer\Watch\WatchLockUnavailableException;
-use AssetOptimizer\Watch\WatchTransition;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Command\SignalableCommandInterface;
@@ -28,21 +27,23 @@ use const SIGTERM;
  *
  * While running it holds the {@see WatchLock}, which is what switches
  * {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler} on in dev — without a
- * watch, dev serves raw originals. Start and stop run a {@see WatchTransition}
- * so the content-hash digests actually flip between the two states; on stop
- * the compiled asset files are kept (their WebP twins make the next start
- * fast) and only the compiled config JSONs are removed — while those exist,
- * AssetMapper would keep serving the compiled assets in dev. If the watch dies
- * without cleanup (kill -9, or Ctrl-C without pcntl), the lock still
- * auto-releases and {@see \AssetOptimizer\EventListener\WatchTransitionListener}
- * heals the state on the next request.
+ * watch, dev serves raw originals. On start it clears AssetMapper's dev cache
+ * so cached raw digests flip to their optimized variants. On stop the compiled
+ * build (asset files + config JSONs) stays in public/assets and dev keeps
+ * serving it — exactly like after a manual `asset-map:compile` in dev, or
+ * sass-bundle's var/sass output. Restarting the watch updates it (reusing the
+ * expensive WebP twins); deleting public/assets returns dev to live raw
+ * serving. Because nothing is cleaned up, dying without a signal handler
+ * (kill -9, or Ctrl-C without pcntl) ends in the same state as a clean stop —
+ * the flock auto-releases with the process.
  *
  * `asset-map:compile` already runs the sass build (via the sass-bundle's
  * PreAssetsCompileEvent listener, if installed), so this single command covers
  * sass + optimization + WebP. JS/CSS are left unminified in dev, which keeps
  * debugging sane. The compile subprocess output is captured and only shown on
  * failure — this deliberately hides AssetMapper's "debug mode is enabled…"
- * warning, irrelevant here because the watch keeps public/assets fresh.
+ * warning while the watch runs and keeps public/assets fresh; the stop message
+ * states the frozen state instead.
  */
 #[AsCommand(
     name: 'asset-optimizer:watch',
@@ -55,12 +56,13 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     private bool $running = true;
 
     public function __construct(
-        private readonly WatchLock       $watchLock,
-        private readonly WatchTransition $transition,
+        private readonly WatchLock $watchLock,
         #[Autowire('%kernel.project_dir%')]
-        private readonly string          $projectDir,
+        private readonly string    $projectDir,
+        #[Autowire('%kernel.cache_dir%')]
+        private readonly string    $cacheDir,
         #[Autowire('%kernel.debug%')]
-        private readonly bool            $debug,
+        private readonly bool      $debug,
     )
     {
         $this->fs = new Filesystem();
@@ -73,7 +75,7 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io->title('Asset Optimizer — watch');
 
         if (!$this->debug) {
-            $io->error('asset-optimizer:watch is a dev preview tool and refuses to run with kernel.debug off (e.g. APP_ENV=prod): its start/stop cleanup would wipe this environment\'s asset cache and compiled config JSONs. Use asset-map:compile for builds.');
+            $io->error('asset-optimizer:watch is a dev preview tool and refuses to run with kernel.debug off (e.g. APP_ENV=prod): there is nothing to preview, and its start would clear this environment\'s asset cache. Use asset-map:compile for builds.');
 
             return Command::FAILURE;
         }
@@ -96,10 +98,11 @@ final class WatchCommand extends Command implements SignalableCommandInterface
 
         try {
             // Digests flip to their optimized variants now that the lock is
-            // held; drop cached raw-digest entries so requests recompute them.
-            if (!$this->transition->toHeld()) {
-                $io->warning('var/asset-optimizer/watch.state is not writable — check permissions. Cached raw digests were not cleared, so web requests may keep serving stale assets.');
-            }
+            // held; drop cached raw-digest entries so the compile recomputes
+            // them. The `asset_mapper` subdirectory mirrors FrameworkBundle's
+            // wiring of asset_mapper.cached_mapped_asset_factory (no public
+            // constant exists).
+            $this->fs->remove($this->cacheDir . '/asset_mapper');
 
             $this->compile($io, 'initial build');
             $signature = $this->snapshot();
@@ -114,15 +117,11 @@ final class WatchCommand extends Command implements SignalableCommandInterface
             }
         } finally {
             $this->watchLock->release();
-            // Back to raw-original digests in dev — also on the failure path,
-            // so a crashed compile never strands the "held" state.
-            if (!$this->transition->toReleased()) {
-                $io->warning('var/asset-optimizer/watch.state is not writable — check permissions. The dev state was not cleaned up and stays in the watch preview until it is fixed.');
-            }
         }
 
         $io->newLine();
-        $io->writeln('Stopped watching.');
+        $io->writeln('Stopped watching. The optimized build stays in <info>public/assets</info> and dev keeps serving it (frozen, like after any <info>asset-map:compile</info>).');
+        $io->writeln('Restart the watch to update it, or delete <info>public/assets</info> to serve raw sources live again.');
 
         return Command::SUCCESS;
     }

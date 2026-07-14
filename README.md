@@ -65,14 +65,13 @@ Plain dev serving delivers your images untouched. Running
 `asset-optimizer:watch` flips dev to the prod-like preview: it holds an
 advisory lock that switches the image compiler on, and keeps `public/assets`
 compiled so the web server serves the optimized rasters statically — which is
-also what makes the [WebP serving rule](#webp-serving-rule) kick in. The two
-dev states use different content-hash digests (raw vs. optimized bytes); the
-watch clears AssetMapper's cache on start and stop so the digests actually
-flip, and a dev-only request listener runs the missed cleanup (cache + the
-compiled config JSONs) if the watch ever dies without it. Every compile stamps
-whether a watch drove it, and the cleanup only removes config JSONs carrying
-that stamp — a manifest you built deliberately with `asset-map:compile` is
-never deleted. Minify gates on `!kernel.debug`.
+also what makes the [WebP serving rule](#webp-serving-rule) kick in. (The two
+dev states use different content-hash digests — raw vs. optimized bytes — so
+the watch clears AssetMapper's cache on start.) Stopping the watch keeps the
+compiled build in place and dev keeps serving it: the same contract as running
+`asset-map:compile` in dev, or sass-bundle's `var/sass` output — compiled
+artifacts persist until you delete them. `rm -rf public/assets` returns dev to
+live raw serving. Minify gates on `!kernel.debug`.
 
 **Source maps:** dev is unaffected (JS is served as raw source; sass-bundle's
 SCSS map works as usual). Prod output ships **without** source maps — tdewolff
@@ -83,9 +82,10 @@ prod assets, disable minify per type (`js.enabled: false`, `css.enabled: false`)
 
 - The **`gd`** PHP extension with WebP support (`ext-gd`, standard on most builds) — used
   for JPEG and as the fallback encoder. `ext-phar` for `.tar.gz` extraction.
-- **`ext-pcntl`** *(optional, CLI only)* — lets `asset-optimizer:watch` clean up
-  on Ctrl-C itself. Without it the stop is a hard kill and the next dev request
-  performs the cleanup instead; behavior is the same either way.
+- **`ext-pcntl`** *(optional, CLI only)* — lets `asset-optimizer:watch` exit
+  gracefully on Ctrl-C. Without it the stop is a hard kill, which ends in the
+  exact same state (the lock releases with the process and the compiled
+  preview stays in place) — you only lose the goodbye message.
 - Network access on the **first** compile: the `minify`, `cwebp` and `oxipng` binaries are
   downloaded once into `var/asset-optimizer/` (cached thereafter). Build-time only —
   each binary is fetched lazily, only when an asset of its type is compiled.
@@ -203,20 +203,18 @@ asset_optimizer:
     - optimized images + WebP are served **only while it runs** — without a
       watch, dev serves raw originals
     - JS/CSS stay unminified
-    - stop with Ctrl-C — dev returns to raw originals automatically: the
-      compiled config JSONs are removed (while they exist, AssetMapper keeps
-      serving compiled assets in dev), but the compiled asset files stay so
-      the next start reuses their WebP twins instead of re-encoding
-    - only one instance can run at a time; if the watch is killed without
-      cleanup (`kill -9`, or Ctrl-C in a PHP build without `pcntl`), the next
-      request notices the released lock and runs the missed cleanup
-      automatically
-    - dev-only: it refuses to run with `kernel.debug` off (its cleanup would
-      wipe that environment's compiled assets).
+    - stop with Ctrl-C — the optimized build **stays** in `public/assets` and
+      dev keeps serving it (frozen, like after any `asset-map:compile`).
+      Restart the watch to update it — the kept files mean the next start
+      reuses the expensive WebP twins instead of re-encoding — or
+      `rm -rf public/assets` to go back to serving raw sources live
+    - only one instance can run at a time; a killed watch (`kill -9`) ends in
+      the same frozen state as a clean stop — nothing to clean up
+    - dev-only: it refuses to run with `kernel.debug` off (e.g. `APP_ENV=prod`) —
+      use `asset-map:compile` for builds.
 - **Prod build:** `APP_ENV=prod bin/console asset-map:compile`
     - one command: sass → minify → optimize → WebP twins → manifest.
     - running `asset-map:compile` manually **in dev** (without a watch) writes
       raw, unoptimized assets plus a manifest that pins dev to that snapshot —
-      AssetMapper then serves it instead of your live sources, and the watch
-      cleanup deliberately won't remove a manifest it didn't compile. Undo
-      with `rm -rf public/assets`.
+      AssetMapper then serves it instead of your live sources. Undo with
+      `rm -rf public/assets`, the same reset as after a watch.

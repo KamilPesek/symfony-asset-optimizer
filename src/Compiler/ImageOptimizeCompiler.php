@@ -22,9 +22,8 @@ use function in_array;
  * design — each is self-consistent, and the watch-on digests match the files
  * the watch compiles into public/assets, so the web server serves those
  * statically (including the .htaccess WebP rule). The watch clears
- * AssetMapper's dev cache on start/stop so cached digests actually flip, and
- * {@see \AssetOptimizer\EventListener\WatchTransitionListener} heals the cache
- * after an unclean stop. Never enlarges (see {@see ImageOptimizer::optimize()}).
+ * AssetMapper's dev cache on start so cached raw digests actually flip.
+ * Never enlarges (see {@see ImageOptimizer::optimize()}).
  */
 final class ImageOptimizeCompiler implements AssetCompilerInterface
 {

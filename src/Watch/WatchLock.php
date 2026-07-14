@@ -30,8 +30,6 @@ final class WatchLock implements ResetInterface
 {
     private const string LOCK_FILE = '/var/asset-optimizer/watch.lock';
 
-    private const string STATE_FILE = '/var/asset-optimizer/watch.state';
-
     private readonly Filesystem $fs;
 
     /** @var resource|null held handle — non-null only inside the watch process */
@@ -127,10 +125,9 @@ final class WatchLock implements ResetInterface
         $handle = @fopen($path, 'r');
         if (false === $handle) {
             // The file exists but can't be opened (a watch run as another user
-            // left it unreadable): the lock is unprobeable, not absent. Answer
-            // with the recorded state so an unreadable lock never manufactures
-            // a held/recorded mismatch that would fight a possibly live watch.
-            return $this->probed = $this->recordedHeld();
+            // left it unreadable): treat as not held — at worst dev serves raw
+            // originals until the permissions are fixed.
+            return $this->probed = false;
         }
         // A shared lock succeeds unless the watch holds its exclusive one, and
         // never collides with other probes running at the same moment.
@@ -143,38 +140,5 @@ final class WatchLock implements ResetInterface
         fclose($handle);
 
         return $this->probed = true;
-    }
-
-    /**
-     * Last lock state whose cache-clearing side effects were performed —
-     * recorded by the watch on clean start/stop and by the transition listener
-     * when it heals after an abnormal termination. A missing or unreadable
-     * record reads as "released", the state every checkout starts in.
-     */
-    public function recordedHeld(): bool
-    {
-        try {
-            return 'on' === $this->fs->readFile($this->projectDir . self::STATE_FILE);
-        } catch (IOException) {
-            return false; // missing or unreadable record → "released"
-        }
-    }
-
-    /**
-     * False when the record cannot be written. Callers must skip the
-     * transition's side effects in that case: a mismatch that can never be
-     * recorded as healed would re-run them on every request.
-     */
-    public function record(bool $held): bool
-    {
-        try {
-            // dumpFile creates the directory and writes atomically (tmp file
-            // + rename), so a killed write can never leave a torn record.
-            $this->fs->dumpFile($this->projectDir . self::STATE_FILE, $held ? 'on' : 'off');
-        } catch (IOException) {
-            return false;
-        }
-
-        return true;
     }
 }
