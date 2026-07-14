@@ -29,8 +29,10 @@ use const SIGTERM;
  * The compile subprocess runs with ASSET_OPTIMIZER_WATCH=1, which is what
  * switches {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler} and the WebP
  * twins on in dev — a manual `asset-map:compile` in dev writes raw originals.
- * On start it clears AssetMapper's dev cache so cached raw digests flip to
- * their optimized variants. On stop the compiled build (asset files + config
+ * Every compile first clears AssetMapper's dev cache: web requests served
+ * while the watch runs don't have the env var, so they would otherwise seed
+ * the shared cache with raw-digest entries the compile would trust and
+ * publish. On stop the compiled build (asset files + config
  * JSONs) stays in public/assets and dev keeps serving it — exactly like after
  * a manual `asset-map:compile` in dev, or sass-bundle's var/sass output.
  * Restarting the watch updates it (reusing the expensive WebP twins); deleting
@@ -52,6 +54,14 @@ use const SIGTERM;
 )]
 final class WatchCommand extends Command implements SignalableCommandInterface
 {
+    /**
+     * Env variable marking a compile as watch-started, set to '1' on the
+     * compile subprocess. Readers must compare against '1' — a presence check
+     * would let an inherited ASSET_OPTIMIZER_WATCH=0 (or empty) flip the dev
+     * preview on.
+     */
+    public const string WATCH_ENV = 'ASSET_OPTIMIZER_WATCH';
+
     private readonly Filesystem $fs;
 
     private bool $running = true;
@@ -104,13 +114,6 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io->newLine();
 
         try {
-            // Digests flip to their optimized variants in the watch's compiles;
-            // drop cached raw-digest entries so the compile recomputes them.
-            // The `asset_mapper` subdirectory mirrors FrameworkBundle's wiring
-            // of asset_mapper.cached_mapped_asset_factory (no public constant
-            // exists).
-            $this->fs->remove($this->cacheDir . '/asset_mapper');
-
             $this->compile($io, 'initial build');
             $signature = $this->snapshot();
 
@@ -158,12 +161,22 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io->write(sprintf('<info>[%s]</info> compiling… ', $reason));
 
         $start = hrtime(true);
+
+        // Drop AssetMapper's cached MappedAssets before every compile. The
+        // cache is shared with dev web requests, keyed on source mtime only —
+        // a request served while the watch runs (no WATCH_ENV in its process)
+        // would cache raw digests that this compile would otherwise trust and
+        // publish into the preview. The `asset_mapper` subdirectory mirrors
+        // FrameworkBundle's wiring of asset_mapper.cached_mapped_asset_factory
+        // (no public constant exists).
+        $this->fs->remove($this->cacheDir . '/asset_mapper');
+
         $process = new Process(
             [PHP_BINARY, $this->projectDir . '/bin/console', 'asset-map:compile', '--no-interaction'],
             $this->projectDir,
             // Flips the dev-gated optimizations (images, WebP twins) on for
             // this compile — see ImageOptimizeCompiler / WebpTwinFilesystem.
-            ['ASSET_OPTIMIZER_WATCH' => '1'],
+            [self::WATCH_ENV => '1'],
         );
         $process->setTimeout(null);
         $process->run();

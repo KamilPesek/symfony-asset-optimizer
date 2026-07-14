@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AssetOptimizer\Path;
 
+use AssetOptimizer\Command\WatchCommand;
 use AssetOptimizer\Image\ImageOptimizer;
 use Symfony\Component\AssetMapper\Path\PublicAssetsFilesystemInterface;
 use Symfony\Component\Filesystem\Filesystem;
@@ -57,7 +58,7 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
      * source when it is genuinely smaller than the raster it would replace.
      *
      * @param ?string $contents the just-written bytes when the caller has them
-     *                          (write); null makes copy read them back from disk
+     *                          (write); null makes copy stat the file instead
      */
     private function writeTwin(string $path, ?string $contents): void
     {
@@ -69,7 +70,7 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
         // dev writes raw rasters, and encoding twins of unoptimized bytes
         // would waste cwebp work on files whose digests no watch preview ever
         // references.
-        if ($this->debug && false === getenv('ASSET_OPTIMIZER_WATCH')) {
+        if ($this->debug && '1' !== getenv(WatchCommand::WATCH_ENV)) {
             return;
         }
 
@@ -87,11 +88,11 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
                 return;
             }
             // $local is the exact raster the twin competes with and was just
-            // written, so its bytes are readable. Only write a genuinely
-            // smaller twin; if the raster can't be read back, the catch below
-            // skips rather than risk shipping a .webp larger than its source.
-            $contents ??= $this->fs->readFile($local);
-            if (strlen($webp) >= strlen($contents)) {
+            // written, so its size is available. Only write a genuinely
+            // smaller twin; if the size can't be read, skip rather than risk
+            // shipping a .webp larger than its source.
+            $sourceSize = null !== $contents ? strlen($contents) : @filesize($local);
+            if (false === $sourceSize || strlen($webp) >= $sourceSize) {
                 return;
             }
             $this->inner->write($path . '.webp', $webp);

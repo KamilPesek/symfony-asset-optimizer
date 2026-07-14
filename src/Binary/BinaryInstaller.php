@@ -6,7 +6,6 @@ namespace AssetOptimizer\Binary;
 
 use PharData;
 use RuntimeException;
-use SplFileInfo;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -135,10 +134,10 @@ final class BinaryInstaller
                 // A parallel first-use compile won the race and placed the
                 // binary first (rename-over-existing is not atomic on Windows,
                 // so it throws here). Its result is equivalent to ours — accept
-                // it rather than failing the build. isFile, not exists: only a
+                // it rather than failing the build. is_file, not exists: only a
                 // real file proves a competitor won; anything else (e.g. a stray
                 // directory) means the rename genuinely failed.
-                if (!new SplFileInfo($binary)->isFile()) {
+                if (!is_file($binary)) {
                     throw $e;
                 }
             }
