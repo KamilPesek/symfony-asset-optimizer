@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace AssetOptimizer\Path;
 
-use AssetOptimizer\Command\WatchCommand;
 use AssetOptimizer\Image\ImageOptimizer;
+use AssetOptimizer\WatchMode;
 use Symfony\Component\AssetMapper\Path\PublicAssetsFilesystemInterface;
 use Symfony\Component\Filesystem\Filesystem;
 use Throwable;
@@ -70,7 +70,7 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
         // dev writes raw rasters, and encoding twins of unoptimized bytes
         // would waste cwebp work on files whose digests no watch preview ever
         // references.
-        if ($this->debug && '1' !== getenv(WatchCommand::WATCH_ENV)) {
+        if ($this->debug && !WatchMode::active()) {
             return;
         }
 

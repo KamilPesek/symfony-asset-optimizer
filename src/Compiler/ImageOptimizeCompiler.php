@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace AssetOptimizer\Compiler;
 
-use AssetOptimizer\Command\WatchCommand;
 use AssetOptimizer\Image\ImageOptimizer;
+use AssetOptimizer\WatchMode;
 use Symfony\Component\AssetMapper\AssetMapperInterface;
 use Symfony\Component\AssetMapper\Compiler\AssetCompilerInterface;
 use Symfony\Component\AssetMapper\MappedAsset;
@@ -22,9 +22,9 @@ use function in_array;
  * different content-hash digests by design — each is self-consistent, and the
  * watch-on digests match the files the watch compiles into public/assets, so
  * the web server serves those statically (including the .htaccess WebP rule).
- * The watch clears AssetMapper's dev cache before every compile so raw-digest
- * entries cached by web requests never leak into the preview. Never enlarges
- * (see {@see ImageOptimizer::optimize()}).
+ * Keeping the two states out of each other's shared MappedAsset cache is the
+ * watch's job — see {@see \AssetOptimizer\Command\WatchCommand}. Never
+ * enlarges (see {@see ImageOptimizer::optimize()}).
  */
 final readonly class ImageOptimizeCompiler implements AssetCompilerInterface
 {
@@ -50,7 +50,7 @@ final readonly class ImageOptimizeCompiler implements AssetCompilerInterface
 
         // Dev serves raw originals unless this compile was started by the
         // watch (prod-like preview).
-        return !$this->debug || '1' === getenv(WatchCommand::WATCH_ENV);
+        return !$this->debug || WatchMode::active();
     }
 
     public function compile(string $content, MappedAsset $asset, AssetMapperInterface $assetMapper): string
