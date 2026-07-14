@@ -6,6 +6,7 @@ namespace AssetOptimizer\Binary;
 
 use PharData;
 use RuntimeException;
+use SplFileInfo;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -16,7 +17,6 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 use ZipArchive;
 use function in_array;
-use function strlen;
 use const PHP_OS_FAMILY;
 
 /**
@@ -112,16 +112,7 @@ final class BinaryInstaller
 
         try {
             $archive = $work . '/archive.' . $ext;
-            $this->fetch($url, $archive);
-
-            // The downloaded bytes get executed, so verify them against the
-            // checksum pinned in Tool before extracting — TLS alone does not
-            // protect against a tampered release artifact.
-            $actualHash = hash_file('sha256', $archive);
-            if (false === $actualHash || !hash_equals($expectedHash, $actualHash)) {
-                throw new RuntimeException(sprintf('Checksum mismatch for "%s" — expected %s.', basename($url), $expectedHash));
-            }
-
+            $this->fetch($url, $archive, $expectedHash);
             $this->extract($archive, $ext, $work);
 
             // Locate the binary by name anywhere inside the extracted tree.
@@ -144,10 +135,10 @@ final class BinaryInstaller
                 // A parallel first-use compile won the race and placed the
                 // binary first (rename-over-existing is not atomic on Windows,
                 // so it throws here). Its result is equivalent to ours — accept
-                // it rather than failing the build. is_file, not exists: only a
+                // it rather than failing the build. isFile, not exists: only a
                 // real file proves a competitor won; anything else (e.g. a stray
                 // directory) means the rename genuinely failed.
-                if (!is_file($binary)) {
+                if (!new SplFileInfo($binary)->isFile()) {
                     throw $e;
                 }
             }
@@ -164,10 +155,10 @@ final class BinaryInstaller
         }
     }
 
-    private function fetch(string $url, string $archive): void
+    private function fetch(string $url, string $archive, string $expectedHash): void
     {
-        // Stream the response straight to disk (never buffer the whole archive in
-        // memory) with a progress bar when a console output is available.
+        // Download with a progress bar when a console output is available.
+        // Archives are a few MB, so buffering the response is fine.
         $this->output?->writeln(sprintf('<info>Asset Optimizer:</info> downloading %s…', basename($url)));
         $progress = null;
         $response = $this->httpClient->request('GET', $url, [
@@ -180,24 +171,18 @@ final class BinaryInstaller
             },
         ]);
 
-        $handle = fopen($archive, 'w');
-        if (false === $handle) {
-            throw new RuntimeException(sprintf('Cannot write "%s".', $archive));
-        }
-        try {
-            foreach ($this->httpClient->stream($response) as $chunk) {
-                $bytes = $chunk->getContent();
-                if (strlen($bytes) !== fwrite($handle, $bytes)) {
-                    throw new RuntimeException(sprintf('Short write to "%s" (disk full?).', $archive));
-                }
-            }
-        } finally {
-            // Always release the handle so the caller's cleanup (and Windows,
-            // which locks open files) can remove the work directory.
-            fclose($handle);
-        }
+        $bytes = $response->getContent();
         $progress?->finish();
         $this->output?->writeln('');
+
+        // The downloaded bytes get executed, so verify them against the
+        // checksum pinned in Tool before writing them anywhere — TLS alone
+        // does not protect against a tampered release artifact.
+        if (!hash_equals($expectedHash, hash('sha256', $bytes))) {
+            throw new RuntimeException(sprintf('Checksum mismatch for "%s" — expected %s.', basename($url), $expectedHash));
+        }
+
+        $this->fs->dumpFile($archive, $bytes);
     }
 
     private function extract(string $archive, string $ext, string $work): void

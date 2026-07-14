@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AssetOptimizer\Path;
 
 use AssetOptimizer\Image\ImageOptimizer;
-use AssetOptimizer\Watch\WatchLock;
 use Symfony\Component\AssetMapper\Path\PublicAssetsFilesystemInterface;
 use Symfony\Component\Filesystem\Filesystem;
 use Throwable;
@@ -28,7 +27,6 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
     public function __construct(
         private PublicAssetsFilesystemInterface $inner,
         private ImageOptimizer                  $optimizer,
-        private WatchLock                       $watchLock,
         private bool                            $debug,
         private bool                            $enabled,
         private int                             $quality,
@@ -40,13 +38,13 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
     public function write(string $path, string $contents): void
     {
         $this->inner->write($path, $contents);
-        $this->writeTwin($path);
+        $this->writeTwin($path, $contents);
     }
 
     public function copy(string $originPath, string $path): void
     {
         $this->inner->copy($originPath, $path);
-        $this->writeTwin($path);
+        $this->writeTwin($path, null);
     }
 
     public function getDestinationPath(): string
@@ -57,17 +55,21 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
     /**
      * Encodes a WebP twin from the just-written asset and drops it next to the
      * source when it is genuinely smaller than the raster it would replace.
+     *
+     * @param ?string $contents the just-written bytes when the caller has them
+     *                          (write); null makes copy read them back from disk
      */
-    private function writeTwin(string $path): void
+    private function writeTwin(string $path, ?string $contents): void
     {
         if (!$this->enabled || 1 !== preg_match('/\.(jpe?g|png)$/i', $path)) {
             return;
         }
 
-        // Mirror ImageOptimizeCompiler's dev gate: without a watch, dev writes
-        // raw rasters, and encoding twins of unoptimized bytes would waste
-        // cwebp work on files whose digests no watch preview ever references.
-        if ($this->debug && !$this->watchLock->isHeld()) {
+        // Mirror ImageOptimizeCompiler's dev gate: outside a watch compile,
+        // dev writes raw rasters, and encoding twins of unoptimized bytes
+        // would waste cwebp work on files whose digests no watch preview ever
+        // references.
+        if ($this->debug && false === getenv('ASSET_OPTIMIZER_WATCH')) {
             return;
         }
 
@@ -85,11 +87,11 @@ final readonly class WebpTwinFilesystem implements PublicAssetsFilesystemInterfa
                 return;
             }
             // $local is the exact raster the twin competes with and was just
-            // written, so its size is available. Only write a genuinely smaller
-            // twin; if the size can't be read, skip rather than risk shipping a
-            // .webp larger than its source.
-            $sourceSize = @filesize($local);
-            if (false === $sourceSize || strlen($webp) >= $sourceSize) {
+            // written, so its bytes are readable. Only write a genuinely
+            // smaller twin; if the raster can't be read back, the catch below
+            // skips rather than risk shipping a .webp larger than its source.
+            $contents ??= $this->fs->readFile($local);
+            if (strlen($webp) >= strlen($contents)) {
                 return;
             }
             $this->inner->write($path . '.webp', $webp);

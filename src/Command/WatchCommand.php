@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace AssetOptimizer\Command;
 
-use AssetOptimizer\Watch\WatchLock;
-use AssetOptimizer\Watch\WatchLockUnavailableException;
+use Exception;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Command\SignalableCommandInterface;
@@ -15,6 +14,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
 use function defined;
 use const PHP_BINARY;
@@ -25,17 +26,17 @@ use const SIGTERM;
  * Dev preview watch: recompiles the asset map whenever a source asset changes,
  * so optimized images + WebP twins are visible live in dev.
  *
- * While running it holds the {@see WatchLock}, which is what switches
- * {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler} on in dev — without a
- * watch, dev serves raw originals. On start it clears AssetMapper's dev cache
- * so cached raw digests flip to their optimized variants. On stop the compiled
- * build (asset files + config JSONs) stays in public/assets and dev keeps
- * serving it — exactly like after a manual `asset-map:compile` in dev, or
- * sass-bundle's var/sass output. Restarting the watch updates it (reusing the
- * expensive WebP twins); deleting public/assets returns dev to live raw
- * serving. Because nothing is cleaned up, dying without a signal handler
- * (kill -9, or Ctrl-C without pcntl) ends in the same state as a clean stop —
- * the flock auto-releases with the process.
+ * The compile subprocess runs with ASSET_OPTIMIZER_WATCH=1, which is what
+ * switches {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler} and the WebP
+ * twins on in dev — a manual `asset-map:compile` in dev writes raw originals.
+ * On start it clears AssetMapper's dev cache so cached raw digests flip to
+ * their optimized variants. On stop the compiled build (asset files + config
+ * JSONs) stays in public/assets and dev keeps serving it — exactly like after
+ * a manual `asset-map:compile` in dev, or sass-bundle's var/sass output.
+ * Restarting the watch updates it (reusing the expensive WebP twins); deleting
+ * public/assets returns dev to live raw serving. Because nothing is cleaned
+ * up, dying without a signal handler (kill -9, or Ctrl-C without pcntl) ends
+ * in the same state as a clean stop.
  *
  * `asset-map:compile` already runs the sass build (via the sass-bundle's
  * PreAssetsCompileEvent listener, if installed), so this single command covers
@@ -56,13 +57,12 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     private bool $running = true;
 
     public function __construct(
-        private readonly WatchLock $watchLock,
         #[Autowire('%kernel.project_dir%')]
-        private readonly string    $projectDir,
+        private readonly string $projectDir,
         #[Autowire('%kernel.cache_dir%')]
-        private readonly string    $cacheDir,
+        private readonly string $cacheDir,
         #[Autowire('%kernel.debug%')]
-        private readonly bool      $debug,
+        private readonly bool   $debug,
     )
     {
         $this->fs = new Filesystem();
@@ -80,14 +80,21 @@ final class WatchCommand extends Command implements SignalableCommandInterface
             return Command::FAILURE;
         }
 
+        // Single-instance guard: a flock held for the command's lifetime
+        // (FlockStore). The OS releases it on any process death — even
+        // SIGKILL — so it can never go stale, unlike a pid or marker file.
+        $lockDir = $this->projectDir . '/var/asset-optimizer';
         try {
-            if (!$this->watchLock->hold()) {
+            $this->fs->mkdir($lockDir, 0o755);
+            $lock = new LockFactory(new FlockStore($lockDir))->createLock('asset-optimizer:watch', ttl: null);
+            if (!$lock->acquire()) {
                 $io->error('Another asset-optimizer:watch is already running.');
 
                 return Command::FAILURE;
             }
-        } catch (WatchLockUnavailableException $e) {
-            $io->error($e->getMessage());
+        } catch (Exception $e) {
+            // mkdir or lock-file creation failed — typically var/ permissions.
+            $io->error(sprintf('Cannot acquire the watch lock in "%s" — check permissions. (%s)', $lockDir, $e->getMessage()));
 
             return Command::FAILURE;
         }
@@ -97,11 +104,11 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io->newLine();
 
         try {
-            // Digests flip to their optimized variants now that the lock is
-            // held; drop cached raw-digest entries so the compile recomputes
-            // them. The `asset_mapper` subdirectory mirrors FrameworkBundle's
-            // wiring of asset_mapper.cached_mapped_asset_factory (no public
-            // constant exists).
+            // Digests flip to their optimized variants in the watch's compiles;
+            // drop cached raw-digest entries so the compile recomputes them.
+            // The `asset_mapper` subdirectory mirrors FrameworkBundle's wiring
+            // of asset_mapper.cached_mapped_asset_factory (no public constant
+            // exists).
             $this->fs->remove($this->cacheDir . '/asset_mapper');
 
             $this->compile($io, 'initial build');
@@ -116,7 +123,7 @@ final class WatchCommand extends Command implements SignalableCommandInterface
                 }
             }
         } finally {
-            $this->watchLock->release();
+            $lock->release();
         }
 
         $io->newLine();
@@ -154,6 +161,9 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $process = new Process(
             [PHP_BINARY, $this->projectDir . '/bin/console', 'asset-map:compile', '--no-interaction'],
             $this->projectDir,
+            // Flips the dev-gated optimizations (images, WebP twins) on for
+            // this compile — see ImageOptimizeCompiler / WebpTwinFilesystem.
+            ['ASSET_OPTIMIZER_WATCH' => '1'],
         );
         $process->setTimeout(null);
         $process->run();

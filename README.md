@@ -62,8 +62,8 @@ Day to day:
 | WebP twins            | **off**                          | on                            | on           |
 
 Plain dev serving delivers your images untouched. Running
-`asset-optimizer:watch` flips dev to the prod-like preview: it holds an
-advisory lock that switches the image compiler on, and keeps `public/assets`
+`asset-optimizer:watch` flips dev to the prod-like preview: its compiles run
+with the image optimizer switched on, and it keeps `public/assets`
 compiled so the web server serves the optimized rasters statically — which is
 also what makes the [WebP serving rule](#webp-serving-rule) kick in. (The two
 dev states use different content-hash digests — raw vs. optimized bytes — so
@@ -214,7 +214,7 @@ asset_optimizer:
       use `asset-map:compile` for builds.
 - **Prod build:** `APP_ENV=prod bin/console asset-map:compile`
     - one command: sass → minify → optimize → WebP twins → manifest.
-    - running `asset-map:compile` manually **in dev** (without a watch) writes
+    - running `asset-map:compile` manually **in dev** writes
       raw, unoptimized assets plus a manifest that pins dev to that snapshot —
       AssetMapper then serves it instead of your live sources. Undo with
       `rm -rf public/assets`, the same reset as after a watch.

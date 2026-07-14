@@ -5,14 +5,12 @@ declare(strict_types=1);
 use AssetOptimizer\Binary\BinaryInstaller;
 use AssetOptimizer\Command\WatchCommand;
 use AssetOptimizer\Compiler\ImageOptimizeCompiler;
-use AssetOptimizer\Compiler\JsCssMinifyCompiler;
-use AssetOptimizer\Compiler\SvgMinifyCompiler;
+use AssetOptimizer\Compiler\MinifyCompiler;
 use AssetOptimizer\EventListener\BinaryDownloadOutputListener;
 use AssetOptimizer\Image\GdImageProcessor;
 use AssetOptimizer\Image\ImageOptimizer;
 use AssetOptimizer\Minify\Minifier;
 use AssetOptimizer\Path\WebpTwinFilesystem;
-use AssetOptimizer\Watch\WatchLock;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\param;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
@@ -28,14 +26,10 @@ return static function (ContainerConfigurator $container): void {
     $services->set(GdImageProcessor::class);
     $services->set(ImageOptimizer::class);
 
-    // Liveness signal between the watch command (holder) and the image
-    // compiler (prober) — see WatchLock for the flock semantics.
-    $services->set(WatchLock::class);
-
     // Compilers run at a very low priority — after the sass compiler and
     // AssetMapper's JS import-path rewriting. autoconfigure is off so the
     // asset_mapper.compiler tag isn't added twice.
-    foreach ([JsCssMinifyCompiler::class, SvgMinifyCompiler::class, ImageOptimizeCompiler::class] as $compiler) {
+    foreach ([MinifyCompiler::class, ImageOptimizeCompiler::class] as $compiler) {
         $services->set($compiler)
             ->autoconfigure(false)
             ->tag('asset_mapper.compiler', ['priority' => -256]);
@@ -48,7 +42,6 @@ return static function (ContainerConfigurator $container): void {
         ->args([
             service('.inner'),
             service(ImageOptimizer::class),
-            service(WatchLock::class),
             param('kernel.debug'),
             param('asset_optimizer.webp_enabled'),
             param('asset_optimizer.webp_quality'),
