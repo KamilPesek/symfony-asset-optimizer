@@ -24,11 +24,11 @@ use function strlen;
  * re-encoding the other. A twin is only written when it is genuinely smaller
  * than what the server would otherwise pick: the raster for WebP; the raster
  * AND the on-disk WebP twin for AVIF, because the Accept rule prefers AVIF
- * when both exist. A candidate rejected as not-smaller leaves a zero-byte
- * `<twin>.skip` marker next to the raster, so the expensive encode is not
- * repeated on every (watch) compile — same content re-encodes to the same
- * bytes. Markers share the twins' lifecycle: content-hashed names, wiped with
- * public/assets.
+ * when both exist. In watch mode a candidate rejected as not-smaller leaves a
+ * zero-byte `<twin>.skip` marker next to the raster, so recompiles on every
+ * file save don't repeat the expensive encode — same content re-encodes to
+ * the same bytes. Prod compiles run once and write no markers. Markers share
+ * the twins' lifecycle: content-hashed names, wiped with public/assets.
  */
 final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
 {
@@ -183,10 +183,16 @@ final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
      * Records "candidate rejected as not smaller" with a zero-byte marker, so
      * the encode is not repeated on every compile for a verdict that cannot
      * change while the content (hash) stays the same.
+     *
+     * Watch mode only: that is where recompiles happen every file save and the
+     * saved encode time is felt. A prod compile runs once, so the marker would
+     * buy nothing and only pollute the deployed public/assets.
      */
     private function markSkipped(string $path, string $twinExt): void
     {
-        $this->inner->write($path . $twinExt . '.skip', '');
+        if (WatchMode::active()) {
+            $this->inner->write($path . $twinExt . '.skip', '');
+        }
     }
 
     private function localPath(string $path): string

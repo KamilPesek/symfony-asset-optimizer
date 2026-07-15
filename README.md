@@ -129,10 +129,11 @@ because browser support differs: a browser that accepts WebP but not AVIF
 (older Safari, some webviews) still gets the `.webp` rung instead of falling
 back to the full raster.
 
-A candidate that came out *larger* leaves a zero-byte `<name>.<ext>.skip`
-marker instead, so recompiles (and every watch tick) don't re-run the
-expensive encode just to reject it again — same content, same verdict. The
-markers live next to the twins and disappear with `public/assets`.
+In watch mode, a candidate that came out *larger* leaves a zero-byte
+`<name>.<ext>.skip` marker instead, so the per-save recompiles don't re-run
+the expensive encode just to reject it again — same content, same verdict.
+Prod compiles run once and write no markers. The markers live next to the
+twins and disappear with `public/assets`.
 
 **Apache** — add to `public/.htaccess` (requires `mod_rewrite` + `mod_headers`),
 before the "serve existing file" rewrite:
