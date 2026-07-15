@@ -113,7 +113,10 @@ final class WatchCommand extends Command implements SignalableCommandInterface
             $this->compile($io, 'initial build');
 
             while ($this->running) {
-                usleep(500_000);
+                // 100 ms tick: the snapshot is a cheap stat sweep, and a
+                // shorter tick directly cuts edit→compile latency (the poll
+                // wait used to dominate it at 500 ms).
+                usleep(100_000);
                 $next = $this->snapshot();
                 if ($next !== $signature) {
                     $signature = $next;
@@ -157,8 +160,23 @@ final class WatchCommand extends Command implements SignalableCommandInterface
 
         $start = hrtime(true);
 
+        // File-backed opcache for the compile subprocess: every compile is a
+        // fresh PHP process that would otherwise re-parse the whole framework
+        // each change (~140 ms). A file cache persists compiled scripts across
+        // subprocesses (per-process SHM would not) and still validates source
+        // timestamps. Harmless no-op when the opcache extension is absent.
+        // Recreated per compile so deleting var/ mid-watch self-heals.
+        $opcacheDir = $this->projectDir . '/var/asset-optimizer/opcache';
+        $this->fs->mkdir($opcacheDir, 0o755);
+
         $process = new Process(
-            [PHP_BINARY, $this->projectDir . '/bin/console', 'asset-map:compile', '--no-interaction'],
+            [
+                PHP_BINARY,
+                '-d', 'opcache.enable_cli=1',
+                '-d', 'opcache.file_cache=' . $opcacheDir,
+                '-d', 'opcache.file_cache_only=1',
+                $this->projectDir . '/bin/console', 'asset-map:compile', '--no-interaction',
+            ],
             $this->projectDir,
             // Flips the dev-gated optimizations (images, WebP twins) on for
             // this compile — see ImageOptimizeCompiler / WebpTwinFilesystem.
