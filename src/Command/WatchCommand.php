@@ -65,6 +65,8 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         private readonly string $projectDir,
         #[Autowire('%kernel.debug%')]
         private readonly bool   $debug,
+        #[Autowire('%asset_optimizer.watch_tick_ms%')]
+        private readonly int    $tickMs,
     )
     {
         $this->fs = new Filesystem();
@@ -113,10 +115,11 @@ final class WatchCommand extends Command implements SignalableCommandInterface
             $this->compile($io, 'initial build');
 
             while ($this->running) {
-                // 100 ms tick: the snapshot is a cheap stat sweep, and a
-                // shorter tick directly cuts edit→compile latency (the poll
-                // wait used to dominate it at 500 ms).
-                usleep(100_000);
+                // Tick from asset_optimizer.watch.tick_ms (default 100 ms).
+                // Detection latency averages tick/2; each tick pays one
+                // snapshot() stat sweep, which grows with asset count — large
+                // trees may prefer a longer tick.
+                usleep($this->tickMs * 1000);
                 $next = $this->snapshot();
                 if ($next !== $signature) {
                     $signature = $next;

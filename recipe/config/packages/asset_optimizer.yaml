@@ -15,3 +15,5 @@ asset_optimizer:
 #    ignore_paths:
 #        - '*.min.js'
 #        - '*.min.css'
+#    watch:
+#        tick_ms: 100           # asset-optimizer:watch poll tick; raise for very large asset trees

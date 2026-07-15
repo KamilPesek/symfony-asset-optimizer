@@ -188,6 +188,8 @@ asset_optimizer:
     ignore_paths:
         - '*.min.js'
         - '*.min.css'
+    watch:
+        tick_ms: 100           # asset-optimizer:watch poll tick (ms); raise for very large asset trees
 ```
 
 > **Changing quality later:** AssetMapper caches compiled assets keyed on the
