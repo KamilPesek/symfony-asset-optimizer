@@ -10,7 +10,7 @@ use AssetOptimizer\EventListener\BinaryDownloadOutputListener;
 use AssetOptimizer\Image\GdImageProcessor;
 use AssetOptimizer\Image\ImageOptimizer;
 use AssetOptimizer\Minify\Minifier;
-use AssetOptimizer\Path\WebpTwinFilesystem;
+use AssetOptimizer\Path\TwinFilesystem;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\param;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
@@ -35,9 +35,10 @@ return static function (ContainerConfigurator $container): void {
             ->tag('asset_mapper.compiler', ['priority' => -256]);
     }
 
-    // WebP twins are generated inside the asset write path — works for every
-    // compile entry point (console command, programmatic, watch subprocess).
-    $services->set(WebpTwinFilesystem::class)
+    // WebP/AVIF twins are generated inside the asset write path — works for
+    // every compile entry point (console command, programmatic, watch
+    // subprocess).
+    $services->set(TwinFilesystem::class)
         ->decorate('asset_mapper.local_public_assets_filesystem')
         ->args([
             service('.inner'),
@@ -45,6 +46,8 @@ return static function (ContainerConfigurator $container): void {
             param('kernel.debug'),
             param('asset_optimizer.webp_enabled'),
             param('asset_optimizer.webp_quality'),
+            param('asset_optimizer.avif_enabled'),
+            param('asset_optimizer.avif_quality'),
         ]);
 
     // Registered via #[AsEventListener] / #[AsCommand] attributes (autoconfigure on).

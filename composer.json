@@ -37,7 +37,7 @@
     "symfony/service-contracts": "^3"
   },
   "suggest": {
-    "ext-zip": "To extract the .zip tool archives (needed on Windows)"
+    "ext-zip": "To extract the .zip tool archives (all tools on Windows; avifenc on every OS — without it AVIF twins fall back to GD)"
   },
   "autoload": {
     "psr-4": {

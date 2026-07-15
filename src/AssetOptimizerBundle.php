@@ -41,16 +41,26 @@ final class AssetOptimizerBundle extends AbstractBundle
             ->arrayNode('svg')->addDefaultsIfNotSet()
             ->children()->booleanNode('enabled')->defaultTrue()->end()->end()
             ->end()
+            // Quality nodes are validated to the encoders' shared 0-100 scale:
+            // an out-of-range value would pass config, then fail per raster
+            // inside the best-effort encode ladder — silently, on every compile.
             ->arrayNode('jpg_png')->addDefaultsIfNotSet()
             ->children()
             ->booleanNode('enabled')->defaultTrue()->end()
-            ->integerNode('quality')->defaultValue(80)->end()
+            ->integerNode('quality')->defaultValue(80)->min(0)->max(100)->end()
             ->end()
             ->end()
             ->arrayNode('webp')->addDefaultsIfNotSet()
             ->children()
             ->booleanNode('enabled')->defaultTrue()->end()
-            ->integerNode('quality')->defaultValue(80)->end()
+            ->integerNode('quality')->defaultValue(80)->min(0)->max(100)->end()
+            ->end()
+            ->end()
+            ->arrayNode('avif')->addDefaultsIfNotSet()
+            ->children()
+            ->booleanNode('enabled')->defaultTrue()->end()
+            // avifenc scale; ~60 AVIF ≈ 80 WebP visually.
+            ->integerNode('quality')->defaultValue(60)->min(0)->max(100)->end()
             ->end()
             ->end()
             ->arrayNode('ignore_paths')
@@ -69,6 +79,8 @@ final class AssetOptimizerBundle extends AbstractBundle
         $builder->setParameter('asset_optimizer.jpg_png_quality', $config['jpg_png']['quality']);
         $builder->setParameter('asset_optimizer.webp_enabled', $config['webp']['enabled']);
         $builder->setParameter('asset_optimizer.webp_quality', $config['webp']['quality']);
+        $builder->setParameter('asset_optimizer.avif_enabled', $config['avif']['enabled']);
+        $builder->setParameter('asset_optimizer.avif_quality', $config['avif']['quality']);
         $builder->setParameter('asset_optimizer.ignore_paths', $config['ignore_paths']);
 
         $container->import($this->getPath() . '/config/services.php');

@@ -15,6 +15,13 @@ web-server `Accept` rule that prefers AVIF, then WebP, then the raster.
   `avifenc` (libavif) if its releases ship artifacts for all five platform
   combos (linux amd64/arm64, mac x64/arm64, windows x64); otherwise `cavif`.
   Resolved when pinning real checksums.
+  - **Resolution (revised at implementation):** `avifenc` kept despite
+    covering only 3 of 5 combos (linux x86-64, macOS arm64, windows x64).
+    The missing combos (notably linux/arm64: Docker on Apple Silicon,
+    Graviton) take the GD route, documented in the README; where GD lacks
+    AVIF support those platforms produce no `.avif` twins, so twin sets
+    differ across architectures. Revisit (or swap to `cavif`) if the arm64
+    gap starts to matter.
 - **Size policy:** write `.avif` only when smaller than the raster AND smaller
   than the `.webp` twin candidate from the same write pass (when one was
   produced). AVIF must never be a byte-size regression versus what the server

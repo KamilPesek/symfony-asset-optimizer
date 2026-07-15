@@ -26,11 +26,11 @@ use const SIGTERM;
 
 /**
  * Dev preview watch: recompiles the asset map whenever a source asset changes,
- * so optimized images + WebP twins are visible live in dev.
+ * so optimized images + WebP/AVIF twins are visible live in dev.
  *
  * The compile subprocess runs with ASSET_OPTIMIZER_WATCH=1 ({@see WatchMode}),
  * which is what switches {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler}
- * and the WebP twins on in dev — a manual `asset-map:compile` in dev writes
+ * and the WebP/AVIF twins on in dev — a manual `asset-map:compile` in dev writes
  * raw originals. Watch compiles keep their MappedAsset cache in a separate
  * namespace ({@see \AssetOptimizer\Factory\WatchScopedMappedAssetFactory}), so
  * web requests served while the watch runs can never seed the compile with
@@ -38,7 +38,7 @@ use const SIGTERM;
  * stop the compiled build (asset files + config JSONs) stays in public/assets
  * and dev keeps serving it — exactly like after a manual `asset-map:compile`
  * in dev, or sass-bundle's var/sass output. Restarting the watch updates it
- * (reusing the expensive WebP twins); deleting public/assets returns dev to
+ * (reusing the expensive WebP/AVIF twins); deleting public/assets returns dev to
  * live raw serving. Because nothing is cleaned up, dying without a signal
  * handler (kill -9, or Ctrl-C without pcntl) ends in the same state as a clean
  * stop.
@@ -77,7 +77,7 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         // Poll tick. Detection latency averages tick/2, and each tick pays one
         // snapshot() stat sweep of assets/, which grows with asset count —
         // very large asset trees may prefer a longer tick.
-        $this->addOption('tick', null, InputOption::VALUE_REQUIRED, 'Poll tick in ms', 100);
+        $this->addOption('tick', null, InputOption::VALUE_REQUIRED, 'Poll tick in ms (clamped to 10–60000)', 100);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -86,8 +86,13 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         $io->title('Asset Optimizer — watch');
 
         // Clamped so a typo can never produce a usleep(0) busy loop or an
-        // hours-long unresponsive tick.
-        $tickMs = min(60_000, max(10, (int) $input->getOption('tick')));
+        // hours-long unresponsive tick — but never silently: a corrected
+        // value is worth a warning, not a guess about what the user meant.
+        $rawTick = $input->getOption('tick');
+        $tickMs = min(60_000, max(10, (int) $rawTick));
+        if ((string) $tickMs !== (string) $rawTick) {
+            $io->warning(sprintf('Ignoring --tick=%s; using %d ms (integer between 10 and 60000).', $rawTick, $tickMs));
+        }
 
         if (!$this->debug) {
             $io->error('asset-optimizer:watch is a dev preview tool and refuses to run with kernel.debug off (e.g. APP_ENV=prod): there is nothing to preview, and its start would clear this environment\'s asset cache. Use asset-map:compile for builds.');
@@ -114,7 +119,7 @@ final class WatchCommand extends Command implements SignalableCommandInterface
             return Command::FAILURE;
         }
 
-        $io->writeln('Watching <info>assets/</info>. Optimized images + WebP are served in dev while this runs.');
+        $io->writeln('Watching <info>assets/</info>. Optimized images + WebP/AVIF are served in dev while this runs.');
         $io->writeln('<comment>Ctrl-C to stop.</comment>');
         $io->newLine();
 
@@ -194,8 +199,8 @@ final class WatchCommand extends Command implements SignalableCommandInterface
                 $this->projectDir . '/bin/console', 'asset-map:compile', '--no-interaction',
             ],
             $this->projectDir,
-            // Flips the dev-gated optimizations (images, WebP twins) on for
-            // this compile — see ImageOptimizeCompiler / WebpTwinFilesystem.
+            // Flips the dev-gated optimizations (images, WebP/AVIF twins) on for
+            // this compile — see ImageOptimizeCompiler / TwinFilesystem.
             [WatchMode::ENV => '1'],
         );
         $process->setTimeout(null);

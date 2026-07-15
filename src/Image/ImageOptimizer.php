@@ -20,6 +20,7 @@ use function strlen;
  * - JPEG: GD re-encode (no downloadable mozjpeg).
  * - PNG:  oxipng (lossless, far better than GD), GD fallback.
  * - WebP: cwebp with max effort (-m 6), GD fallback.
+ * - AVIF: avifenc, GD fallback (only if that GD build has AVIF support).
  */
 final readonly class ImageOptimizer
 {
@@ -75,6 +76,36 @@ final readonly class ImageOptimizer
         }
 
         return $this->gd->webp($content, $quality);
+    }
+
+    /**
+     * Encode an image file as AVIF. Returns the bytes, or null on failure.
+     */
+    public function avif(string $sourcePath, int $quality): ?string
+    {
+        try {
+            // avifenc cannot write to stdout, so encode via a temp file.
+            $tmp = $this->fs->tempnam(sys_get_temp_dir(), 'asset-optimizer-', '.avif');
+            try {
+                $this->run([$this->binaries->path(Tool::Avifenc), '-q', (string) $quality, '--jobs', 'all', $sourcePath, '-o', $tmp]);
+                $bytes = $this->fs->readFile($tmp);
+                if ('' !== $bytes) {
+                    return $bytes;
+                }
+            } finally {
+                $this->fs->remove($tmp);
+            }
+        } catch (Throwable) {
+            // fall through to GD
+        }
+
+        try {
+            $content = $this->fs->readFile($sourcePath);
+        } catch (IOException) {
+            return null;
+        }
+
+        return $this->gd->avif($content, $quality);
     }
 
     private function oxipng(string $content): ?string

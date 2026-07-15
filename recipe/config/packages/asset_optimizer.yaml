@@ -12,6 +12,9 @@ asset_optimizer:
 #    webp:
 #        enabled: true
 #        quality: 80            # cwebp -q
+#    avif:
+#        enabled: true
+#        quality: 60            # avifenc -q; ~60 AVIF ≈ 80 WebP visually
 #    ignore_paths:
 #        - '*.min.js'
 #        - '*.min.css'

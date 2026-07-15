@@ -7,9 +7,9 @@ namespace AssetOptimizer;
 /**
  * The watch marker: asset-optimizer:watch runs its compile subprocesses with
  * {@see self::ENV} set to '1', which flips the dev-gated optimizations
- * (image optimization, WebP twins) on for that compile — see
+ * (image optimization, WebP/AVIF twins) on for that compile — see
  * {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler} and
- * {@see \AssetOptimizer\Path\WebpTwinFilesystem}.
+ * {@see \AssetOptimizer\Path\TwinFilesystem}.
  */
 final class WatchMode
 {
