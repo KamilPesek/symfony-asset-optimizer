@@ -57,14 +57,6 @@ final class AssetOptimizerBundle extends AbstractBundle
             ->scalarPrototype()->end()
             ->defaultValue(['*.min.js', '*.min.css'])
             ->end()
-            ->arrayNode('watch')->addDefaultsIfNotSet()
-            ->children()
-            // Poll tick of asset-optimizer:watch. Detection latency averages
-            // tick/2, and each tick stat-sweeps assets/, so large asset trees
-            // may want a longer tick. min(10) guards against a busy loop.
-            ->integerNode('tick_ms')->defaultValue(100)->min(10)->end()
-            ->end()
-            ->end()
             ->end();
     }
 
@@ -78,7 +70,6 @@ final class AssetOptimizerBundle extends AbstractBundle
         $builder->setParameter('asset_optimizer.webp_enabled', $config['webp']['enabled']);
         $builder->setParameter('asset_optimizer.webp_quality', $config['webp']['quality']);
         $builder->setParameter('asset_optimizer.ignore_paths', $config['ignore_paths']);
-        $builder->setParameter('asset_optimizer.watch_tick_ms', $config['watch']['tick_ms']);
 
         $container->import($this->getPath() . '/config/services.php');
     }

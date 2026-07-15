@@ -10,6 +10,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Command\SignalableCommandInterface;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -65,18 +66,28 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         private readonly string $projectDir,
         #[Autowire('%kernel.debug%')]
         private readonly bool   $debug,
-        #[Autowire('%asset_optimizer.watch_tick_ms%')]
-        private readonly int    $tickMs,
     )
     {
         $this->fs = new Filesystem();
         parent::__construct();
     }
 
+    protected function configure(): void
+    {
+        // Poll tick. Detection latency averages tick/2, and each tick pays one
+        // snapshot() stat sweep of assets/, which grows with asset count —
+        // very large asset trees may prefer a longer tick.
+        $this->addOption('tick', null, InputOption::VALUE_REQUIRED, 'Poll tick in ms', 100);
+    }
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $io->title('Asset Optimizer — watch');
+
+        // Clamped so a typo can never produce a usleep(0) busy loop or an
+        // hours-long unresponsive tick.
+        $tickMs = min(60_000, max(10, (int) $input->getOption('tick')));
 
         if (!$this->debug) {
             $io->error('asset-optimizer:watch is a dev preview tool and refuses to run with kernel.debug off (e.g. APP_ENV=prod): there is nothing to preview, and its start would clear this environment\'s asset cache. Use asset-map:compile for builds.');
@@ -115,11 +126,13 @@ final class WatchCommand extends Command implements SignalableCommandInterface
             $this->compile($io, 'initial build');
 
             while ($this->running) {
-                // Tick from asset_optimizer.watch.tick_ms (default 100 ms).
-                // Detection latency averages tick/2; each tick pays one
-                // snapshot() stat sweep, which grows with asset count — large
-                // trees may prefer a longer tick.
-                usleep($this->tickMs * 1000);
+                usleep($tickMs * 1000);
+                // A signal interrupts the usleep; without this check the loop
+                // body would still stat-sweep and possibly run a full compile
+                // after Ctrl-C.
+                if (!$this->running) {
+                    break;
+                }
                 $next = $this->snapshot();
                 if ($next !== $signature) {
                     $signature = $next;

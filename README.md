@@ -188,8 +188,6 @@ asset_optimizer:
     ignore_paths:
         - '*.min.js'
         - '*.min.css'
-    watch:
-        tick_ms: 100           # asset-optimizer:watch poll tick (ms); raise for very large asset trees
 ```
 
 > **Changing quality later:** AssetMapper caches compiled assets keyed on the
@@ -213,6 +211,8 @@ asset_optimizer:
       `rm -rf public/assets` to go back to serving raw sources live
     - only one instance can run at a time; a killed watch (`kill -9`) ends in
       the same frozen state as a clean stop — nothing to clean up
+    - `--tick=<ms>` sets the poll tick (default 100); raise it for very large
+      asset trees where the per-tick stat sweep gets expensive
     - dev-only: it refuses to run with `kernel.debug` off (e.g. `APP_ENV=prod`) —
       use `asset-map:compile` for builds.
 - **Prod build:** `APP_ENV=prod bin/console asset-map:compile`
