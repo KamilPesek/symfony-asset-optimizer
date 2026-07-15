@@ -67,8 +67,8 @@ with the image optimizer switched on, and it keeps `public/assets`
 compiled so the web server serves the optimized rasters statically — which is
 also what makes the [WebP serving rule](#webp-serving-rule) kick in. (The two
 dev states use different content-hash digests — raw vs. optimized bytes — so
-the watch clears AssetMapper's cache before each compile and on stop.)
-Stopping the watch keeps the
+watch compiles keep their asset cache in a separate namespace and never share
+entries with plain dev serving.) Stopping the watch keeps the
 compiled build in place and dev keeps serving it: the same contract as running
 `asset-map:compile` in dev, or sass-bundle's `var/sass` output — compiled
 artifacts persist until you delete them. `rm -rf public/assets` returns dev to

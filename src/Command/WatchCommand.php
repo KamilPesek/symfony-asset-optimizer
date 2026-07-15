@@ -13,7 +13,6 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\Filesystem\Exception\IOException;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Lock\LockFactory;
@@ -31,20 +30,17 @@ use const SIGTERM;
  * The compile subprocess runs with ASSET_OPTIMIZER_WATCH=1 ({@see WatchMode}),
  * which is what switches {@see \AssetOptimizer\Compiler\ImageOptimizeCompiler}
  * and the WebP twins on in dev — a manual `asset-map:compile` in dev writes
- * raw originals. The two states share AssetMapper's dev cache (keyed on source
- * mtime only), so the watch clears it around its compiles: before each one,
- * because web requests served while the watch runs don't have the env var and
- * would otherwise seed it with raw-digest entries the compile would trust and
- * publish (a request racing an in-flight compile can still slip one in — the
- * next compile drops it); and on stop, so dev's dynamic serving never trusts
- * the watch's optimized-digest entries once public/assets is deleted. On stop
- * the compiled build (asset files + config JSONs) stays in public/assets and
- * dev keeps serving it — exactly like after a manual `asset-map:compile` in
- * dev, or sass-bundle's var/sass output. Restarting the watch updates it
+ * raw originals. Watch compiles keep their MappedAsset cache in a separate
+ * namespace ({@see \AssetOptimizer\Factory\WatchScopedMappedAssetFactory}), so
+ * web requests served while the watch runs can never seed the compile with
+ * raw-digest entries, and unchanged assets stay cache hits across compiles. On
+ * stop the compiled build (asset files + config JSONs) stays in public/assets
+ * and dev keeps serving it — exactly like after a manual `asset-map:compile`
+ * in dev, or sass-bundle's var/sass output. Restarting the watch updates it
  * (reusing the expensive WebP twins); deleting public/assets returns dev to
- * live raw serving. Dying without a signal handler (kill -9, or Ctrl-C without
- * pcntl) ends in the same state minus that final cache clear — the next watch
- * compile or a cache:clear drops the leftovers.
+ * live raw serving. Because nothing is cleaned up, dying without a signal
+ * handler (kill -9, or Ctrl-C without pcntl) ends in the same state as a clean
+ * stop.
  *
  * `asset-map:compile` already runs the sass build (via the sass-bundle's
  * PreAssetsCompileEvent listener, if installed), so this single command covers
@@ -67,8 +63,6 @@ final class WatchCommand extends Command implements SignalableCommandInterface
     public function __construct(
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
-        #[Autowire('%kernel.cache_dir%')]
-        private readonly string $cacheDir,
         #[Autowire('%kernel.debug%')]
         private readonly bool   $debug,
     )
@@ -127,9 +121,6 @@ final class WatchCommand extends Command implements SignalableCommandInterface
                 }
             }
         } finally {
-            // Drop the watch's optimized-digest entries so dev's dynamic
-            // serving never trusts them once public/assets is deleted.
-            $this->clearAssetMapperCache();
             $lock->release();
         }
 
@@ -166,11 +157,6 @@ final class WatchCommand extends Command implements SignalableCommandInterface
 
         $start = hrtime(true);
 
-        // Web requests served during the watch would otherwise seed the
-        // shared cache with raw-digest entries this compile would trust and
-        // publish — see the class docblock.
-        $this->clearAssetMapperCache();
-
         $process = new Process(
             [PHP_BINARY, $this->projectDir . '/bin/console', 'asset-map:compile', '--no-interaction'],
             $this->projectDir,
@@ -191,21 +177,6 @@ final class WatchCommand extends Command implements SignalableCommandInterface
         // Surface the real error only when the compile actually fails.
         $io->writeln('<error>failed:</error>');
         $io->write($process->getErrorOutput() ?: $process->getOutput());
-    }
-
-    /**
-     * Drops AssetMapper's cached MappedAssets. The `asset_mapper` subdirectory
-     * mirrors FrameworkBundle's wiring of asset_mapper.cached_mapped_asset_factory
-     * (no public constant exists). Best-effort: a dev web request racing the
-     * removal (recreating an entry mid-delete, or holding a Windows lock) must
-     * not kill the watch — leftovers go on the next clear.
-     */
-    private function clearAssetMapperCache(): void
-    {
-        try {
-            $this->fs->remove($this->cacheDir . '/asset_mapper');
-        } catch (IOException) {
-        }
     }
 
     public function getSubscribedSignals(): array

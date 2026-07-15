@@ -22,9 +22,9 @@ use function in_array;
  * different content-hash digests by design — each is self-consistent, and the
  * watch-on digests match the files the watch compiles into public/assets, so
  * the web server serves those statically (including the .htaccess WebP rule).
- * Keeping the two states out of each other's shared MappedAsset cache is the
- * watch's job — see {@see \AssetOptimizer\Command\WatchCommand}. Never
- * enlarges (see {@see ImageOptimizer::optimize()}).
+ * The two states never share a MappedAsset cache — watch compiles use their
+ * own namespace ({@see \AssetOptimizer\Factory\WatchScopedMappedAssetFactory}).
+ * Never enlarges (see {@see ImageOptimizer::optimize()}).
  */
 final readonly class ImageOptimizeCompiler implements AssetCompilerInterface
 {

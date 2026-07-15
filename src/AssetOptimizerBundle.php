@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AssetOptimizer;
 
+use AssetOptimizer\DependencyInjection\WatchScopedAssetCachePass;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -19,6 +20,12 @@ final class AssetOptimizerBundle extends AbstractBundle
     public function getPath(): string
     {
         return dirname(__DIR__);
+    }
+
+    public function build(ContainerBuilder $container): void
+    {
+        parent::build($container);
+        $container->addCompilerPass(new WatchScopedAssetCachePass());
     }
 
     public function configure(DefinitionConfigurator $definition): void
