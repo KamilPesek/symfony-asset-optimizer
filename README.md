@@ -256,7 +256,9 @@ asset_optimizer:
 >   here. Remove `public/assets` and recompile: that re-evaluates rejected
 >   candidates *and* re-encodes accepted twins that still carry old-quality
 >   bytes. The same wipe applies after a bundle upgrade that bumps the pinned
->   encoder versions, and when the same `public/assets` gets compiled under
+>   encoder versions (or one from a version that still had the GD twin
+>   fallback — GD-era twins and markers otherwise linger as if the binaries
+>   had produced them), and when the same `public/assets` gets compiled under
 >   different per-env quality values (markers carry no config, so the first
 >   env's verdict would silently win).
 >

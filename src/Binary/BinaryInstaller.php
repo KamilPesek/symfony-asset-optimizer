@@ -105,6 +105,13 @@ final class BinaryInstaller
         $expectedHash = $tool->sha256($os, $arch); // before the download: fails fast on platforms with no artifact
         $ext = str_ends_with($url, '.zip') ? 'zip' : 'tar.gz';
 
+        // Also before the download: without ext-zip the fetch would pull the
+        // full archive just to throw in extract() — on every compile, since
+        // nothing on disk records the failure.
+        if ('zip' === $ext && !class_exists(ZipArchive::class)) {
+            throw new RuntimeException('The "zip" PHP extension is required to extract .zip tool archives.');
+        }
+
         // Unique per attempt so concurrent processes never share extraction state.
         $work = $dir . '/.' . $tool->value . '-' . bin2hex(random_bytes(8));
         $this->fs->mkdir($work, 0o755);
@@ -192,9 +199,6 @@ final class BinaryInstaller
             return;
         }
 
-        if (!class_exists(ZipArchive::class)) {
-            throw new RuntimeException('The "zip" PHP extension is required to extract .zip tool archives.');
-        }
         $zip = new ZipArchive();
         if (true !== $zip->open($archive)) {
             throw new RuntimeException(sprintf('Cannot open "%s".', $archive));

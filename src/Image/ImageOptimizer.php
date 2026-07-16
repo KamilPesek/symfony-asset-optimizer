@@ -91,7 +91,11 @@ final readonly class ImageOptimizer
                 $this->run([$avifenc, '-q', (string) $quality, '--jobs', 'all', $sourcePath, '-o', $tmp]);
                 $bytes = $this->fs->readFile($tmp);
             } finally {
-                $this->fs->remove($tmp);
+                try {
+                    $this->fs->remove($tmp);
+                } catch (Throwable) {
+                    // a leaked temp file must not discard a successful encode
+                }
             }
         } catch (Throwable) {
             return null;

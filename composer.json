@@ -1,6 +1,6 @@
 {
   "name": "pesek/symfony-asset-optimizer",
-  "description": "Symfony AssetMapper optimizer, npm-free: minify JS/CSS/SVG (tdewolff/minify), optimize PNG (oxipng) and JPEG (GD), and generate + serve WebP twins (cwebp) — all via auto-downloaded binaries with a GD fallback.",
+  "description": "Symfony AssetMapper optimizer, npm-free: minify JS/CSS/SVG (tdewolff/minify), optimize PNG (oxipng) and JPEG (GD), and generate + serve WebP/AVIF twins (cwebp, avifenc) — all via auto-downloaded binaries (JPEG/PNG fall back to GD).",
   "type": "symfony-bundle",
   "license": "MIT",
   "authors": [
@@ -37,7 +37,7 @@
     "symfony/service-contracts": "^3"
   },
   "suggest": {
-    "ext-zip": "To extract the .zip tool archives (all tools on Windows; avifenc on every OS — without it AVIF twins fall back to GD)"
+    "ext-zip": "To extract the .zip tool archives (all tools on Windows; avifenc on every OS — without it AVIF twins are skipped)"
   },
   "autoload": {
     "psr-4": {
