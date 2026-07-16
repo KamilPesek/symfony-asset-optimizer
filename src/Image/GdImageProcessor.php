@@ -38,54 +38,6 @@ final class GdImageProcessor
     }
 
     /**
-     * Encodes any supported raster as WebP at the given quality (alpha preserved).
-     * Returns the bytes, or null on failure.
-     */
-    public function webp(string $content, int $quality): ?string
-    {
-        return $this->encodeTruecolor($content, static fn (GdImage $img) => imagewebp($img, null, $quality));
-    }
-
-    /**
-     * Encodes any supported raster as AVIF at the given quality (alpha
-     * preserved). Returns the bytes, or null on failure — including when this
-     * GD build ships without AVIF support (common; needs libavif compiled in).
-     */
-    public function avif(string $content, int $quality): ?string
-    {
-        if (!function_exists('imageavif')) {
-            return null;
-        }
-
-        return $this->encodeTruecolor($content, static fn (GdImage $img) => imageavif($img, null, $quality));
-    }
-
-    /**
-     * Shared twin-encode scaffold: truecolor conversion + alpha preservation,
-     * then the format-specific encoder. One copy of the prep policy, so WebP
-     * and AVIF twins can never silently diverge.
-     *
-     * @param callable(GdImage): bool $encode
-     */
-    private function encodeTruecolor(string $content, callable $encode): ?string
-    {
-        $img = @imagecreatefromstring($content);
-        if (false === $img) {
-            return null;
-        }
-
-        try {
-            imagepalettetotruecolor($img);
-            imagealphablending($img, false);
-            imagesavealpha($img, true);
-
-            return self::capture($img, $encode);
-        } finally {
-            imagedestroy($img);
-        }
-    }
-
-    /**
      * Runs a GD encoder that writes to stdout and captures its bytes. The
      * buffer is closed in a finally so a throwing encoder (GD warning promoted
      * to an exception by the dev ErrorHandler) cannot leak an output-buffer

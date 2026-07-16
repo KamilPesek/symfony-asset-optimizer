@@ -2,6 +2,13 @@
 
 2026-07-15. Approved in brainstorming session.
 
+> **Dated design record.** The implementation has since grown behavior this
+> spec does not cover: zero-byte `<twin>.skip` rejection markers (written on
+> every compile), binary-only twin encoding (the GD fallback described below
+> was removed for twins), the demote-existing-`.avif` re-validation branch,
+> and an on-disk `.webp` size read-back. The `TwinFilesystem` class docblock
+> and the README's "Twin serving rule" section are the source of truth.
+
 ## Goal
 
 Generate `.avif` twins next to compiled rasters the same way `.webp` twins are

@@ -26,9 +26,11 @@ use function strlen;
  * AND the on-disk WebP twin for AVIF, because the Accept rule prefers AVIF
  * when both exist. A candidate rejected as not-smaller leaves a zero-byte
  * `<twin>.skip` marker next to the raster, so the expensive encode is not
- * repeated on every (watch) compile — same content re-encodes to the same
- * bytes. Markers share the twins' lifecycle: content-hashed names, wiped with
- * public/assets.
+ * repeated on any later compile — same content, same config, same verdict.
+ * Twins are encoded by the pinned binaries only (no GD fallback), so every
+ * on-disk twin and marker is a binary-encoder verdict; an unavailable binary
+ * skips the twin and the next compile retries. Markers share the twins'
+ * lifecycle: content-hashed names, wiped with public/assets.
  */
 final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
 {
@@ -95,10 +97,10 @@ final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
             return;
         }
 
-        // Each format is best-effort in isolation: the encode (incl. its GD
-        // fallback), the size check, or the write may break the build, and a
-        // failed format must not cost the other its twin. A missing twin is
-        // fine; the Accept rule serves the next candidate instead.
+        // Each format is best-effort in isolation: the encode, the size
+        // check, or the write may break the build, and a failed format must
+        // not cost the other its twin. A missing twin is fine; the Accept
+        // rule serves the next candidate instead.
         if ($this->webpEnabled) {
             try {
                 $this->writeWebp($path, $local, $sourceSize);
@@ -136,15 +138,21 @@ final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
 
     private function writeAvif(string $path, string $local, int $sourceSize): void
     {
+        // Steady-state first: a marker means the verdict is already recorded,
+        // before any stat of the neighbouring files is paid.
+        if ($this->fs->exists($local . '.avif.skip')) {
+            return; // rejected before: same content re-encodes to the same bytes
+        }
+
         // The Accept rule prefers AVIF over WebP on existence alone, so the
         // AVIF twin must beat the raster AND whatever .webp sits on disk —
         // written by this pass, an earlier compile, or before WebP was
-        // disabled. Unreadable size → skip conservatively, mirroring the
-        // raster rule above.
+        // disabled. Unreadable or empty (truncated by outside tooling) size →
+        // skip conservatively, mirroring the raster rule above.
         $webpSize = null;
         if ($this->fs->exists($local . '.webp')) {
             $webpSize = @filesize($local . '.webp');
-            if (false === $webpSize) {
+            if (false === $webpSize || 0 === $webpSize) {
                 return;
             }
         }
@@ -153,18 +161,18 @@ final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
             // Re-validate: the twin may predate a back-filled smaller .webp
             // (it was bounded by the raster alone while WebP was disabled).
             // Re-encoding cannot help — same content, same bytes — so demote
-            // it to a marker and let the Accept rule fall through to WebP.
+            // it to a marker and let the Accept rule fall through to WebP. A
+            // failed stat is no evidence: bail and let a later compile decide.
             $avifSize = @filesize($local . '.avif');
-            if (false === $avifSize || $avifSize >= $sourceSize || (null !== $webpSize && $avifSize >= $webpSize)) {
+            if (false === $avifSize) {
+                return;
+            }
+            if ($avifSize >= $sourceSize || (null !== $webpSize && $avifSize >= $webpSize)) {
                 $this->fs->remove($local . '.avif');
                 $this->markSkipped($path, '.avif');
             }
 
             return;
-        }
-
-        if ($this->fs->exists($local . '.avif.skip')) {
-            return; // rejected before: same content re-encodes to the same bytes
         }
 
         $avif = $this->optimizer->avif($local, $this->avifQuality);
@@ -181,8 +189,10 @@ final readonly class TwinFilesystem implements PublicAssetsFilesystemInterface
 
     /**
      * Records "candidate rejected as not smaller" with a zero-byte marker, so
-     * the encode is not repeated on every compile for a verdict that cannot
-     * change while the content (hash) stays the same.
+     * the encode is not repeated on every compile. The verdict only holds for
+     * the same content (hash), twin quality config, and encoder version —
+     * hence a quality change or encoder bump needs a public/assets wipe to be
+     * re-evaluated (see README).
      */
     private function markSkipped(string $path, string $twinExt): void
     {

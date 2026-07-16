@@ -7,20 +7,24 @@ namespace AssetOptimizer\Image;
 use AssetOptimizer\Binary\BinaryInstaller;
 use AssetOptimizer\Binary\Tool;
 use RuntimeException;
-use Symfony\Component\Filesystem\Exception\IOException;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\Process;
 use Throwable;
 use function strlen;
 
 /**
- * Image optimization + WebP via standalone binaries (cwebp, oxipng), with a
- * pure-PHP GD fallback if a binary is unavailable or fails.
+ * Image optimization + WebP/AVIF via standalone binaries (cwebp, avifenc,
+ * oxipng).
  *
  * - JPEG: GD re-encode (no downloadable mozjpeg).
  * - PNG:  oxipng (lossless, far better than GD), GD fallback.
- * - WebP: cwebp with max effort (-m 6), GD fallback.
- * - AVIF: avifenc, GD fallback (only if that GD build has AVIF support).
+ * - WebP: cwebp with max effort (-m 6), binary-only.
+ * - AVIF: avifenc, binary-only.
+ *
+ * Twin encodes (WebP/AVIF) have no GD fallback: GD output is notably larger
+ * than the pinned binaries', and a GD-derived twin or rejection verdict would
+ * persist in public/assets long after the binary becomes available. A missing
+ * binary just skips the twin; the next compile retries.
  */
 final readonly class ImageOptimizer
 {
@@ -55,57 +59,45 @@ final readonly class ImageOptimizer
     }
 
     /**
-     * Encode an image file as WebP. Returns the bytes, or null on failure.
+     * Encode an image file as WebP via cwebp. Returns the bytes, or null when
+     * the binary is unavailable or fails.
      */
     public function webp(string $sourcePath, int $quality): ?string
     {
         try {
             // Piped via stdout ('-o -') — no temp files.
             $bytes = $this->run([$this->binaries->path(Tool::Cwebp), '-quiet', '-m', '6', '-q', (string) $quality, $sourcePath, '-o', '-']);
-            if ('' !== $bytes) {
-                return $bytes;
-            }
         } catch (Throwable) {
-            // fall through to GD
-        }
-
-        try {
-            $content = $this->fs->readFile($sourcePath);
-        } catch (IOException) {
             return null;
         }
 
-        return $this->gd->webp($content, $quality);
+        return '' !== $bytes ? $bytes : null;
     }
 
     /**
-     * Encode an image file as AVIF. Returns the bytes, or null on failure.
+     * Encode an image file as AVIF via avifenc. Returns the bytes, or null
+     * when the binary is unavailable or fails.
      */
     public function avif(string $sourcePath, int $quality): ?string
     {
         try {
+            // Resolve the binary before any filesystem work: an unavailable
+            // avifenc must not cost a temp-file create/remove per candidate.
+            $avifenc = $this->binaries->path(Tool::Avifenc);
+
             // avifenc cannot write to stdout, so encode via a temp file.
             $tmp = $this->fs->tempnam(sys_get_temp_dir(), 'asset-optimizer-', '.avif');
             try {
-                $this->run([$this->binaries->path(Tool::Avifenc), '-q', (string) $quality, '--jobs', 'all', $sourcePath, '-o', $tmp]);
+                $this->run([$avifenc, '-q', (string) $quality, '--jobs', 'all', $sourcePath, '-o', $tmp]);
                 $bytes = $this->fs->readFile($tmp);
-                if ('' !== $bytes) {
-                    return $bytes;
-                }
             } finally {
                 $this->fs->remove($tmp);
             }
         } catch (Throwable) {
-            // fall through to GD
-        }
-
-        try {
-            $content = $this->fs->readFile($sourcePath);
-        } catch (IOException) {
             return null;
         }
 
-        return $this->gd->avif($content, $quality);
+        return '' !== $bytes ? $bytes : null;
     }
 
     private function oxipng(string $content): ?string

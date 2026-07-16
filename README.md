@@ -5,8 +5,9 @@ optimize them, and the usual answers (esbuild, svgo, imagemin, squoosh…) drag
 Node, npm and `node_modules` into a PHP project. This bundle fills that gap
 **npm-free**: each job uses a standalone binary that is auto-downloaded on
 first use (like sass-bundle's dart-sass) and degrades gracefully — a failed
-download never breaks the build (images/WebP fall back to pure-PHP GD, minify
-ships the files unminified).
+download never breaks the build (JPEG/PNG optimization falls back to pure-PHP
+GD, WebP/AVIF twins wait for the binary and are retried on the next compile,
+minify ships the files unminified).
 
 - **Minify** JS, CSS and SVG → **`tdewolff/minify`** — production compile only.
 - **Optimize** PNG → **`oxipng`** (lossless); JPEG → **PHP GD**.
@@ -86,12 +87,11 @@ prod assets, disable minify per type (`js.enabled: false`, `css.enabled: false`)
 
 ### Requirements — no npm
 
-- The **`gd`** PHP extension with WebP support (`ext-gd`, standard on most builds) — used
-  for JPEG and as the fallback encoder. `ext-phar` for `.tar.gz` extraction.
+- The **`gd`** PHP extension (`ext-gd`, standard on most builds) — used for
+  JPEG and as the PNG fallback encoder. `ext-phar` for `.tar.gz` extraction.
 - **`ext-zip`** for `.zip` extraction: all tools on Windows, and `avifenc` on
   every OS (libavif only ships `.zip`). Missing on a slim Linux image →
-  AVIF falls back to GD, which usually has no AVIF support — twins are then
-  silently skipped.
+  AVIF twins are silently skipped.
 - **`ext-pcntl`** *(optional, CLI only)* — lets `asset-optimizer:watch` exit
   gracefully on Ctrl-C. Without it the stop is a hard kill, which ends in the
   exact same state (the lock releases with the process and the compiled
@@ -102,11 +102,14 @@ prod assets, disable minify per type (`js.enabled: false`, `css.enabled: false`)
   asset of its type is compiled.
 
 Nothing in your `package.json`, no `node_modules`. If a binary can't be
-downloaded, the build still succeeds: image, WebP and AVIF jobs fall back to
-pure-PHP GD automatically (AVIF only where that GD build has AVIF support —
-otherwise the raster simply ships without an `.avif` twin), and JS/CSS/SVG are
-shipped unminified. `avifenc` has upstream artifacts for linux x86-64, macOS
-arm64 and Windows x64; other platforms use the GD route.
+downloaded, the build still succeeds: JPEG/PNG optimization falls back to
+pure-PHP GD automatically, WebP/AVIF twins are skipped for that compile and
+retried on the next one (twins are never GD-encoded — GD's output is notably
+larger than the pinned binaries', and a GD-made twin or rejection verdict
+would stick around in `public/assets` after the binary turns up), and
+JS/CSS/SVG are shipped unminified. `avifenc` has upstream artifacts for linux
+x86-64, macOS arm64 and Windows x64; other platforms ship without `.avif`
+twins.
 
 > **JPEG note:** JPEG stays on GD — mozjpeg (the tool that would beat it) publishes no
 > standalone binary. `oxipng` (PNG) and `cwebp -m6` (WebP) are the real wins over GD.
@@ -132,7 +135,9 @@ back to the full raster.
 A candidate that came out *larger* leaves a zero-byte `<name>.<ext>.skip`
 marker instead, so recompiles (and every watch tick) don't re-run the
 expensive encode just to reject it again — same content, same verdict. The
-markers live next to the twins and disappear with `public/assets`.
+markers live next to the twins, ship with them — a zero-byte `.skip` is
+publicly fetchable like any file in `public/` — and disappear with
+`public/assets`.
 
 **Apache** — add to `public/.htaccess` (requires `mod_rewrite` + `mod_headers`),
 before the "serve existing file" rewrite:
@@ -239,14 +244,23 @@ asset_optimizer:
         - '*.min.css'
 ```
 
-> **Changing quality later:** AssetMapper caches compiled assets keyed on the
-> *source file*, not on this config. After changing a quality value, clear the
-> matching env's cache (`APP_ENV=prod bin/console cache:clear`) before
-> recompiling, or already-compiled images keep their old bytes. The same goes
-> for `.skip` markers in `public/assets`: a twin rejected under the old quality
-> stays rejected until the directory is wiped, so remove `public/assets` too if
-> you want rejected candidates re-evaluated. Fresh CI/deploy builds are
-> unaffected.
+> **Changing quality later:** two separate caches hold old results, with
+> different remedies.
+> - `jpg_png.quality`: AssetMapper caches compiled assets keyed on the *source
+>   file*, not on this config. Clear the matching env's cache
+>   (`APP_ENV=prod bin/console cache:clear`) before recompiling; the new raster
+>   bytes then get new hashed filenames, so twins and markers re-derive on
+>   their own.
+> - `webp.quality` / `avif.quality`: twins and `.skip` markers are gated purely
+>   on file existence in `public/assets` — `cache:clear` has **no** effect
+>   here. Remove `public/assets` and recompile: that re-evaluates rejected
+>   candidates *and* re-encodes accepted twins that still carry old-quality
+>   bytes. The same wipe applies after a bundle upgrade that bumps the pinned
+>   encoder versions, and when the same `public/assets` gets compiled under
+>   different per-env quality values (markers carry no config, so the first
+>   env's verdict would silently win).
+>
+> Fresh CI/deploy builds are unaffected either way.
 
 ### Commands
 
