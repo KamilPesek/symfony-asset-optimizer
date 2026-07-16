@@ -242,8 +242,11 @@ asset_optimizer:
 > **Changing quality later:** AssetMapper caches compiled assets keyed on the
 > *source file*, not on this config. After changing a quality value, clear the
 > matching env's cache (`APP_ENV=prod bin/console cache:clear`) before
-> recompiling, or already-compiled images keep their old bytes. Fresh CI/deploy
-> builds are unaffected.
+> recompiling, or already-compiled images keep their old bytes. The same goes
+> for `.skip` markers in `public/assets`: a twin rejected under the old quality
+> stays rejected until the directory is wiped, so remove `public/assets` too if
+> you want rejected candidates re-evaluated. Fresh CI/deploy builds are
+> unaffected.
 
 ### Commands
 
